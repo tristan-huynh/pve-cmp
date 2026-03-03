@@ -1,9 +1,78 @@
 ---
-import Default from "../layout/default.astro"
+import Default from "../layout/default.astro";
+import { getNodes, getVMs, getPools, getPool, type PVEVM } from "../api/client";
+
+let poolsWithVMs: { poolid: string; comment?: string; vms: PVEVM[] }[] = [];
+let error: string | null = null;
+
+try {
+    // Fetch all nodes+VMs and all pools in parallel
+    const [nodes, pools] = await Promise.all([getNodes(), getPools()]);
+
+    // Build a flat map of vmid -> VM details across all nodes
+    const allVMs = (await Promise.all(nodes.map((n) => getVMs(n.node)))).flat();
+    const vmMap = new Map(allVMs.map((vm) => [vm.vmid, vm]));
+
+
+    poolsWithVMs = await Promise.all(
+        pools.map(async (pool) => {
+            const detail = await getPool(pool.poolid);
+            const vms = detail.members
+                .filter((m) => m.type === "qemu")
+                .map((m) => vmMap.get(m.vmid))
+                .filter((vm): vm is PVEVM => vm !== undefined);
+            return { poolid: pool.poolid, comment: pool.comment, vms };
+        })
+    );
+} catch (e: any) {
+    error = e.message;
+    console.error("PVE Error:", e);
+}
 ---
 
 <Default>
-	
-	
+    <main class="mt-16 p-6">
+        {error && (
+            <div class="bg-red-100 text-red-700 p-4 rounded mb-4">
+                <strong>Error:</strong> {error}
+            </div>
+        )}
+        {poolsWithVMs.map(({ poolid, comment, vms }) => (
+            <section class="mb-8">
+                <h2 class="text-xl font-bold">{poolid}</h2>
+                {comment && <p class="text-sm text-gray-500 mb-2">{comment}</p>}
+                <table class="w-full text-left border mt-2">
+                    <thead>
+                        <tr class="bg-gray-200">
+                            <th class="p-2">VMID</th>
+                            <th class="p-2">Name</th>
+                            <th class="p-2">Status</th>
+                            <th class="p-2">CPU</th>
+                            <th class="p-2">Memory</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {vms.length === 0 && (
+                            <tr>
+                                <td class="p-2 text-gray-400 italic" colspan="5">No VMs in this pool</td>
+                            </tr>
+                        )}
+                        {vms.map((vm) => (
+                            <tr class="border-t">
+                                <td class="p-2">{vm.vmid}</td>
+                                <td class="p-2">{vm.name}</td>
+                                <td class="p-2">
+                                    <span class={`px-2 py-0.5 rounded text-xs font-semibold ${vm.status === "running" ? "bg-green-100 text-green-700" : "bg-gray-200 text-gray-500"}`}>
+                                        {vm.status}
+                                    </span>
+                                </td>
+                                <td class="p-2">{(vm.cpu * 100).toFixed(1)}%</td>
+                                <td class="p-2">{(vm.mem / 1024 / 1024 / 1024).toFixed(1)} GB / {(vm.maxmem / 1024 / 1024 / 1024).toFixed(1)} GB</td>
+                            </tr>
+                        ))}
+                    </tbody>
+                </table>
+            </section>
+        ))}
+    </main>
 </Default>
-
