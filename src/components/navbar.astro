@@ -1,0 +1,43 @@
+---
+import {Image} from 'astro:assets';
+// import logo from "https://placehold.co/120x120";
+---
+<nav class="bg-gray-600 absolute top-0 left-0 right-0 w-full p-1 z-20">
+    <div class="flex items-center justify-between">
+        <!-- logo -->
+        <a href="/" class="group">
+        <Image
+            src="https://placehold.co/120x120"
+            width={120}
+            height={120}
+            alt="Logo"
+            loading="eager"
+            class="h-10 w-auto"
+        />
+        <ul class="md:flex flex-1 items-center space-x-4 px-6 py-2 text-white">
+            <li>
+                <a class="relative group " href="/">
+                    Home    
+                </a>
+            </li>
+            <li>
+                <a class="relative group" href="/servers">
+                    Servers    
+                </a>
+            </li>
+            <li>
+                <a class="relative group" href="/storage">
+                    Storage    
+                </a>
+            </li>
+        </ul>
+        <ul class="flex items-center space-x-4 mr-4 px-6 py-2 text-white bg-red-400">
+            <li>
+                <a class="relative group">
+                    user0@realm    
+                </a>
+            </li>  
+            </ul>
+        </ul>
+    </div>
+</nav>
