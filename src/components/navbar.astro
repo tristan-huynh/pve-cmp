@@ -1,8 +1,11 @@
 ---
-import {Image} from 'astro:assets';
-// import logo from "https://placehold.co/120x120";
+import { Image } from 'astro:assets';
+import { auth } from "../lib/auth";
+
+const session = await auth.api.getSession({ headers: Astro.request.headers });
+const user = session?.user;
 ---
-<nav class="bg-gray-600 absolute top-0 left-0 right-0 w-full p-1 z-20">
+<nav class="bg-neutral-700 absolute top-0 left-0 right-0 w-full p-1 z-20">
     <div class="flex items-center justify-between">
         <!-- logo -->
         <a href="/" class="group">
@@ -14,30 +17,39 @@ import {Image} from 'astro:assets';
             loading="eager"
             class="h-10 w-auto"
         />
+        </a>
         <ul class="md:flex flex-1 items-center space-x-4 px-6 py-2 text-white">
             <li>
-                <a class="relative group " href="/">
-                    Home    
-                </a>
-            </li>
-            <li>
-                <a class="relative group" href="/servers">
-                    Servers    
-                </a>
-            </li>
-            <li>
-                <a class="relative group" href="/storage">
-                    Storage    
-                </a>
+                <h1 class="relative group">Control Management Panel</h1>
             </li>
         </ul>
-        <ul class="flex items-center space-x-4 mr-4 px-6 py-2 text-white bg-red-400">
-            <li>
-                <a class="relative group">
-                    user0@realm    
-                </a>
-            </li>  
-            </ul>
+        <ul class="flex items-center space-x-4 mr-4 px-6 py-2 text-white">
+            {user && (
+                <>
+                    <li>
+                        <div>
+                            <input type="text" placeholder="Search (Ctrl+K)" class="bg-neutral-600 text-white rounded-sm px-2 py-1 w-48" />
+                        </div>
+                    </li>
+                    <li class="text-sm text-gray-200">{user.name ?? user.email}</li>
+                    <li>
+                        <button id="signout-btn" class="bg-blue-400 hover:bg-blue-500 text-white text-sm px-3 py-1 rounded transition">
+                            Sign Out
+                        </button>
+                    </li>
+                </>
+            )}
         </ul>
     </div>
 </nav>
+
+<script>
+    document.getElementById("signout-btn")?.addEventListener("click", async () => {
+        await fetch("/api/auth/sign-out", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({}),
+        });
+        window.location.href = "/sign-in";
+    });
+</script>

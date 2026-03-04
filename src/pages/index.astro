@@ -1,6 +1,10 @@
 ---
 import Default from "../layout/default.astro";
 import { getNodes, getVMs, getPools, getPool, type PVEVM } from "../api/client";
+import { auth } from "../lib/auth";
+
+const session = await auth.api.getSession({ headers: Astro.request.headers });
+if (!session) return Astro.redirect("/sign-in");
 
 let poolsWithVMs: { poolid: string; comment?: string; vms: PVEVM[] }[] = [];
 let error: string | null = null;

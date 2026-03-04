@@ -9,11 +9,14 @@
     "astro": "astro"
   },
   "dependencies": {
-    "@auth/core": "^0.37.4",
     "@tailwindcss/vite": "^4.2.1",
     "astro": "^5.17.1",
-    "auth-astro": "^4.2.0",
+    "better-auth": "^1.5.2",
+    "better-sqlite3": "^12.6.2",
     "tailwindcss": "^4.2.1",
     "undici": "^7.22.0"
+  },
+  "devDependencies": {
+    "@types/better-sqlite3": "^7.6.13"
   }
 }

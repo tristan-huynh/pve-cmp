@@ -17,6 +17,9 @@ pnpm-debug.log*
 .env
 .env.production
 
+# SQLite database
+data/
+
 # macOS-specific files
 .DS_Store
 
