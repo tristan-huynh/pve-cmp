@@ -1,0 +1,52 @@
+---
+import { Image } from 'astro:assets';
+import NoAuth from "../layout/noauth.astro";
+import { auth } from "../lib/auth";
+
+const session = await auth.api.getSession({ headers: Astro.request.headers });
+if (session) return Astro.redirect("/");
+---
+
+<NoAuth>
+    <div class="bg-neutral-800 flex items-center justify-center min-h-screen">
+        <div class="flex flex-row overflow-hidden rounded-xs">
+
+            <div class="bg-neutral-500 text-white flex flex-col items-start gap-2 p-6 w-md">
+                <Image
+                    src="https://placehold.co/512x512"
+                    width={512}
+                    height={512}
+                    alt="Logo"
+                    loading="eager"
+                    class="h-50 w-auto"
+                />
+                <h1 class="text-2xl font-bold">Control Management Panel</h1>
+                <p class="text-md">Sign in with your OIDC provider to continue.</p>
+            </div>
+
+            <div class="bg-neutral-700 text-white flex flex-col items-center justify-center gap-2 p-6 w-md">
+                <svg class="h-25 w-25 shrink-0" fill="currentColor" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 576 512"><!--!Font Awesome Free v7.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free Copyright 2026 Fonticons, Inc.--><path d="M224 8a120 120 0 1 1 0 240 120 120 0 1 1 0-240zM194.3 304l59.4 0c29.7 0 57.7 7.3 82.3 20.1l0 4.3c-19.6 17.6-32 43.1-32 71.5l0 96c0 5.5 .5 10.9 1.3 16.1L45.7 512C29.3 512 16 498.7 16 482.3 16 383.8 95.8 304 194.3 304zm301.7 .1c0-17.7-14.3-32-32-32s-32 14.3-32 32l0 47.9 64 0 0-47.9zM352 400c0-20.9 13.4-38.7 32-45.3l0-50.6c0-44.2 35.8-80 80-80s80 35.8 80 80l0 50.6c18.6 6.6 32 24.4 32 45.3l0 96c0 26.5-21.5 48-48 48l-128 0c-26.5 0-48-21.5-48-48l0-96z"/></svg>
+                <button
+                    id="signin-btn"
+                    class="bg-blue-400 flex items-center gap-2 px-3 py-2 text-sm transition p-1 rounded-xs cursor-pointer hover:bg-blue-300"
+                >
+                    <svg class="h-4 w-4 shrink-0" fill="currentColor" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><!--!Font Awesome Free v7.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free Copyright 2026 Fonticons, Inc.--><path d="M271.5 432l-68 32C88.5 453.7 0 392.5 0 318.2 0 246.7 82.5 187.2 191.7 173.9l0 43c-71.5 12.5-124 53-124 101.3 0 51 58.5 93.3 135.7 103l0-340 68-33.2 0 384 .1 0zM448 291l-131.3-28.5 36.8-20.7c-19.5-11.5-43.5-20-70-24.8l0-43c46.2 5.5 87.7 19.5 120.3 39.3l35-19.8 9.2 97.5z"/></svg>
+                    Login with OIDC
+                </button>
+                <p class="text-xs text-gray-300">Don't have an account? Contact your administrator.</p>
+            </div>
+        </div>
+    </div>
+</NoAuth>
+
+<script>
+    document.getElementById("signin-btn")?.addEventListener("click", async () => {
+        const res = await fetch("/api/auth/sign-in/oauth2", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ providerId: "authentik", callbackURL: "/" }),
+        });
+        const data = await res.json();
+        if (data.url) window.location.href = data.url;
+    });
+</script>

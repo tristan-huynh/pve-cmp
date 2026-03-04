@@ -14,7 +14,7 @@ async function pveRequest<T>(path: string, options: RequestInit = {}): Promise<T
             "Content-Type": "application/json",
             ...options.headers,
         },
-        // Required if your PVE uses a self-signed cert - remove in production
+        // Required if your PVE uses a self-signed cert
        // @ts-ignore
         dispatcher: new (await import("undici")).Agent({
             connect: { rejectUnauthorized: false }

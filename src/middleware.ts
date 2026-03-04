@@ -1,7 +1,7 @@
 import { defineMiddleware } from "astro:middleware";
 import { auth } from "./lib/auth";
 
-const PUBLIC_PATHS = ["/sign-in", "/api/auth"];
+const PUBLIC_PATHS = ["/login", "/api/auth"];
 
 export const onRequest = defineMiddleware(async (context, next) => {
     const { pathname } = context.url;
@@ -15,7 +15,7 @@ export const onRequest = defineMiddleware(async (context, next) => {
     });
 
     if (!session) {
-        return context.redirect("/sign-in");
+        return context.redirect("/login");
     }
 
     return next();

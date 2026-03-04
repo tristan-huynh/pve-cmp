@@ -1,6 +1,5 @@
 ---
 import Navbar from "../components/navbar.astro";
-import Leftbar from "../components/leftbar.astro";
 import "../styles/global.css";
 ---
 
@@ -9,14 +8,10 @@ import "../styles/global.css";
     <head>
         <meta charset="UTF-8" />
         <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-        <title>Control Management Plane</title>
+        <title>Control Management Plane - Login</title>
     </head>
     <body>
     <Navbar />
-    <Leftbar />
-    <main class="pl-48 pt-14">
-        <slot />
-    </main>
-    
+    <slot />
     </body>
 </html>
