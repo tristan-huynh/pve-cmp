@@ -49,6 +49,13 @@ export async function stopVM(node: string, vmid: number) {
     return pveRequest(`/nodes/${node}/qemu/${vmid}/status/stop`, { method: "POST" });
 }
 
+export async function getVNCProxy(node: string, vmid: number) {
+    return pveRequest<{ ticket: string; port: number; cert?: string }>(
+        `/nodes/${node}/qemu/${vmid}/vncproxy`,
+        { method: "POST", body: JSON.stringify({ websocket: 1 }) }
+    );
+}
+
 export async function getStorage(node: string) {
     return pveRequest<PVEStorage[]>(`/nodes/${node}/storage`);
 }
@@ -89,7 +96,8 @@ export interface PVEVM {
     cpu: number;
     mem: number;
     maxmem: number;
-    disk: number;
+    disk: number; // current disk write I/O (bytes)
+    maxdisk: number;
     uptime: number;
 }
 

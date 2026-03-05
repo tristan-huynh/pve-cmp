@@ -1,3 +1,13 @@
 ---
+import Default from "../layout/default.astro";
+import { auth } from "../lib/auth";
 
+const session = await auth.api.getSession({ headers: Astro.request.headers });
+if (!session) return Astro.redirect("/sign-in");
 ---
+
+<Default>
+    <main class="mt-16 p-6">
+        <h1>Oops</h1>
+    </main>
+</Default>

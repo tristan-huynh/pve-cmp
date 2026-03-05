@@ -1,3 +1,342 @@
 ---
+import Default from "../layout/default.astro";
+import { getPools, getPool, getVMStatus } from "../api/client";
+import type { PVEVMStatus } from "../api/client";
+import { auth } from "../lib/auth";
 
+const session = await auth.api.getSession({ headers: Astro.request.headers });
+if (!session) return Astro.redirect("/sign-in");
+
+const user = session.user;
+
+let vms: (PVEVMStatus & { node: string })[] = [];
+let error = "";
+
+try {
+    const pools = await getPools();
+    const userPool = pools.find(p =>
+        p.poolid === user.email ||
+        p.poolid === user.email?.split("@")[0] ||
+        p.poolid === user.name
+    );
+
+    if (userPool) {
+        const poolDetail = await getPool(userPool.poolid);
+        const vmMembers = poolDetail.members.filter(m => m.type === "qemu");
+        vms = (await Promise.all(
+            vmMembers.map(async (m) => {
+                try {
+                    const status = await getVMStatus(m.node, m.vmid);
+                    return { ...status, node: m.node };
+                } catch { return null; }
+            })
+        )).filter(Boolean) as (PVEVMStatus & { node: string })[];
+    } else {
+        error = `No pool found matching user "${user.name ?? user.email}".`;
+    }
+} catch (e) {
+    error = `Failed to fetch data: ${e instanceof Error ? e.message : e}`;
+}
+
+const totalCpu    = vms.reduce((s, v) => s + v.cpu, 0);
+const totalMemGb  = vms.reduce((s, v) => s + v.maxmem, 0) / 1024 ** 3;
+const totalDiskGb = vms.reduce((s, v) => s + v.maxdisk, 0) / 1024 ** 3;
+
+function formatUptime(s: number): string {
+    const d = Math.floor(s / 86400);
+    const h = Math.floor((s % 86400) / 3600);
+    const m = Math.floor((s % 3600) / 60);
+    return `${d}d ${h}h ${m}m`;
+}
+
+function vmDisplayName(vm: PVEVMStatus & { node: string }): string {
+    return vm.name ?? `VM ${vm.vmid}`;
+}
+
+function vmConsoleUrl(vm: PVEVMStatus & { node: string }): string {
+    return `/console?vmid=${vm.vmid}&node=${encodeURIComponent(vm.node)}&name=${encodeURIComponent(vmDisplayName(vm))}`;
+}
+
+const firstVm = vms[0] ?? null;
 ---
+
+<Default>
+    <div class="flex h-[calc(100vh-3.5rem)] overflow-hidden">
+        <div class="bg-neutral-900 border-neutral-600 flex flex-col w-xs border-r   overflow-y-auto">
+            <div class="border-neutral-600 p-4 border-b">
+                <p class="text-neutral-300 text-md">Allocated Resources</p>
+                <div class="flex flex-col gap-2">
+                    <div class="text-neutral-300 text-xs">
+                        <div class="flex justify-between">
+                            <span>VMs</span><span>{vms.length} / 10</span>
+                        </div>
+                        <div class="w-full bg-neutral-700 rounded h-1.5">
+                            <div class="bg-blue-400 h-1.5 rounded" style={`width:${Math.min((vms.length/10)*100,100)}%`}></div>
+                        </div>
+                    </div>
+                    <div class="text-neutral-300 text-xs">
+                        <div class="flex justify-between">
+                            <span>CPU</span><span>{(totalCpu * 100).toFixed(1)}% avg</span>
+                        </div>
+                        <div class="w-full bg-neutral-700 rounded h-1.5">
+                            <div class="bg-blue-400 h-1.5 rounded" style={`width:${Math.min(totalCpu*100/Math.max(vms.length,1),100).toFixed(0)}%`}></div>
+                        </div>
+                    </div>
+                    <div class="text-neutral-300 text-xs">
+                        <div class="flex justify-between">
+                            <span>Memory</span><span>{totalMemGb.toFixed(1)} GB / 64 GB</span>
+                        </div>
+                        <div class="w-full bg-neutral-700 rounded h-1.5">
+                            <div class="bg-purple-400 h-1.5 rounded" style={`width:${Math.min((totalMemGb/64)*100,100).toFixed(0)}%`}></div>
+                        </div>
+                    </div>
+                    <div class="text-neutral-300 text-xs">
+                        <div class="flex justify-between">
+                            <span>Disk</span><span>{totalDiskGb.toFixed(0)} GB / 500 GB</span>
+                        </div>
+                        <div class="w-full bg-neutral-700 rounded h-1.5">
+                            <div class="bg-amber-400 h-1.5 rounded" style={`width:${Math.min((totalDiskGb/500)*100,100).toFixed(0)}%`}></div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="flex flex-col overflow-y-auto">
+                <div class="flex items-center justify-between px-4 pt-4 pb-2">
+                    <p class="text-md text-neutral-300">Virtual Machines</p>
+                    <button
+                        id="create-vm-btn"
+                        class="bg-blue-400 hover:bg-blue-500 text-white flex flex-row items-center gap-1 text-sm px-2 py-1 rounded-xs cursor-pointer transition"
+                    >
+                        <svg class="h-4 w-4 shrink-0" fill="currentColor" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><!--!Font Awesome Free v7.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free Copyright 2026 Fonticons, Inc.--><path d="M256 64c0-17.7-14.3-32-32-32s-32 14.3-32 32l0 160-160 0c-17.7 0-32 14.3-32 32s14.3 32 32 32l160 0 0 160c0 17.7 14.3 32 32 32s32-14.3 32-32l0-160 160 0c17.7 0 32-14.3 32-32s-14.3-32-32-32l-160 0 0-160z"/></svg>
+                        New VM
+                    </button>
+                </div>
+                {error && <p class="text-xs text-rose-400 px-4 pb-2">{error}</p>}
+                {vms.length === 0 && !error && (
+                    <p class="text-xs text-neutral-500 px-4">No VMs found.</p>
+                )}
+                {vms.map((vm, i) => {
+                    const name       = vmDisplayName(vm);
+                    const cpu        = `${(vm.cpu * 100).toFixed(1)}%`;
+                    const mem        = `${(vm.mem / 1024 ** 3).toFixed(2)} / ${(vm.maxmem / 1024 ** 3).toFixed(2)} GB`;
+                    const disk       = `${(vm.maxdisk / 1024 ** 3).toFixed(1)} GB`;
+                    const uptime     = vm.uptime ? formatUptime(vm.uptime) : "-";
+                    const statusCls  = vm.status === "running" ? "text-green-400" : "text-neutral-400";
+                    const consoleUrl = vmConsoleUrl(vm)
+                    return (
+                        <button
+                            class={`border-neutral-600 hover:bg-neutral-700 flex flex-row items-center vm-row w-full text-left px-4 py-3 border-b transition gap-3${i === 0 ? " bg-neutral-700" : ""}`}
+                            data-vmid={vm.vmid}
+                            data-name={name}
+                            data-status={vm.status}
+                            data-status-class={statusCls}
+                            data-console-url={consoleUrl}
+                            data-cpu={cpu}
+                            data-mem={mem}
+                            data-disk={disk}
+                            data-uptime={uptime}
+                        >
+                            <span class={`h-2 w-2 rounded-full shrink-0 ${vm.status === "running" ? "bg-green-400" : "bg-red-400"}`}></span>
+                            <div class="min-w-0">
+                                <p class="text-sm text-neutral-200 truncate">{name}</p>
+                                <p class="text-xs text-neutral-500">
+                                    {(vm.cpu * 100).toFixed(1)}% CPU · {(vm.mem / 1024 ** 3).toFixed(1)}/{(vm.maxmem / 1024 ** 3).toFixed(1)}GB · {((vm.uptime ?? 0) / 86400).toFixed(1)}d
+                                </p>
+                                
+                            </div>
+                        </button>
+                    );
+                })}
+            </div>
+        </div>
+
+        <!-- DETAIL SIDEBAR -->
+        <div class="bg-neutral-900 border-r border-neutral-600 flex flex-col w-64 shrink-0 overflow-y-auto">
+
+            <!-- VM name + status -->
+            <div class="border-b border-neutral-600 px-4 py-3 flex flex-col gap-0.5">
+                <p id="detail-name" class="text-sm font-medium text-neutral-200 truncate">
+                    {firstVm ? vmDisplayName(firstVm) : "No VM selected"}
+                </p>
+                <p id="detail-status" class={`text-xs ${firstVm?.status === "running" ? "text-green-400" : "text-neutral-500"}`}>
+                    {firstVm?.status ?? "—"}
+                </p>
+            </div>
+
+            <!-- Power controls -->
+            <div class="border-b border-neutral-600 px-4 py-3 flex flex-col gap-2">
+                <p class="text-sm text-neutral-300">Power</p>
+                <div class="grid grid-cols-2 gap-1.5">
+                    <button data-power="start"   class="power-btn col-span-2 flex items-center justify-center gap-2 px-2 py-2 rounded-xs text-xs bg-green-500 text-neutral-100 hover:bg-green-500/20 transition cursor-pointer">
+                        <svg class="h-4 w-4" fill="currentColor" <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><!--!Font Awesome Free v7.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free Copyright 2026 Fonticons, Inc.--><path d="M91.2 36.9c-12.4-6.8-27.4-6.5-39.6 .7S32 57.9 32 72l0 368c0 14.1 7.5 27.2 19.6 34.4s27.2 7.5 39.6 .7l336-184c12.8-7 20.8-20.5 20.8-35.1s-8-28.1-20.8-35.1l-336-184z"/></svg>
+                        Start
+                    </button>
+                    <button data-power="shutdown" class="power-btn flex items-center justify-center gap-2 px-2 py-2 rounded-xs text-xs bg-neutral-700 text-neutral-100 hover:bg-neutral-600 transition cursor-pointer">
+                        <svg class="h-4 w-4" fill="currentColor"xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512"><!--!Font Awesome Free v7.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free Copyright 2026 Fonticons, Inc.--><path d="M288 0c0-17.7-14.3-32-32-32S224-17.7 224 0l0 256c0 17.7 14.3 32 32 32s32-14.3 32-32L288 0zM146.3 98.4c14.5-10.1 18-30.1 7.9-44.6s-30.1-18-44.6-7.9C43.4 92.1 0 169 0 256 0 397.4 114.6 512 256 512S512 397.4 512 256c0-87-43.4-163.9-109.7-210.1-14.5-10.1-34.4-6.6-44.6 7.9s-6.6 34.4 7.9 44.6c49.8 34.8 82.3 92.4 82.3 157.6 0 106-86 192-192 192S64 362 64 256c0-65.2 32.5-122.9 82.3-157.6z"/></svg>
+                        Shutdown
+                    </button>
+                    <button data-power="reboot"   class="power-btn flex items-center justify-center gap-2 px-2 py-2 rounded-xs text-xs bg-neutral-700 text-neutral-100 hover:bg-neutral-600 transition cursor-pointer">
+                        <svg class="h-4 w-4" fill="currentColor" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512"><!--!Font Awesome Free v7.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free Copyright 2026 Fonticons, Inc.--><path d="M65.9 228.5c13.3-93 93.4-164.5 190.1-164.5 53 0 101 21.5 135.8 56.2 .2 .2 .4 .4 .6 .6l7.6 7.2-47.9 0c-17.7 0-32 14.3-32 32s14.3 32 32 32l128 0c17.7 0 32-14.3 32-32l0-128c0-17.7-14.3-32-32-32s-32 14.3-32 32l0 53.4-11.3-10.7C390.5 28.6 326.5 0 256 0 127 0 20.3 95.4 2.6 219.5 .1 237 12.2 253.2 29.7 255.7s33.7-9.7 36.2-27.1zm443.5 64c2.5-17.5-9.7-33.7-27.1-36.2s-33.7 9.7-36.2 27.1c-13.3 93-93.4 164.5-190.1 164.5-53 0-101-21.5-135.8-56.2-.2-.2-.4-.4-.6-.6l-7.6-7.2 47.9 0c17.7 0 32-14.3 32-32s-14.3-32-32-32L32 320c-8.5 0-16.7 3.4-22.7 9.5S-.1 343.7 0 352.3l1 127c.1 17.7 14.6 31.9 32.3 31.7S65.2 496.4 65 478.7l-.4-51.5 10.7 10.1c46.3 46.1 110.2 74.7 180.7 74.7 129 0 235.7-95.4 253.4-219.5z"/></svg>
+                        Reboot
+                    </button>
+                    <button data-power="stop"    class="power-btn col-span-2 flex items-center justify-center gap-2 px-2 py-2 rounded-xs text-xs bg-red-500 text-neutral-100 hover:bg-rose-500/20 transition cursor-pointer">
+                        <svg class="h-4 w-4" fill="currentColor" <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><!--!Font Awesome Free v7.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free Copyright 2026 Fonticons, Inc.--><path d="M64 32l320 0c35.3 0 64 28.7 64 64l0 320c0 35.3-28.7 64-64 64L64 480c-35.3 0-64-28.7-64-64L0 96C0 60.7 28.7 32 64 32z"/></svg>
+                        Force Stop
+                    </button>
+                </div>
+            </div>
+
+            <!-- Live specs -->
+            <div class="border-b border-neutral-600 px-4 py-3 flex flex-col gap-2">
+                <p class="text-sm text-neutral-300">System Information</p>
+                <div id="vm-specs" class="flex flex-col gap-1.5 text-xs">
+                    {firstVm ? (
+                        <>
+                            <div class="flex justify-between"><span class="text-neutral-500">CPU usage</span><span class="text-neutral-300" id="spec-cpu">{(firstVm.cpu * 100).toFixed(1)}%</span></div>
+                            <div class="flex justify-between"><span class="text-neutral-500">Memory</span><span class="text-neutral-300" id="spec-mem">{(firstVm.mem / 1024 ** 3).toFixed(2)} / {(firstVm.maxmem / 1024 ** 3).toFixed(2)} GB</span></div>
+                            <div class="flex justify-between"><span class="text-neutral-500">Disk</span><span class="text-neutral-300" id="spec-disk">{(firstVm.maxdisk / 1024 ** 3).toFixed(1)} GB</span></div>
+                            <div class="flex justify-between"><span class="text-neutral-500">Uptime</span><span class="text-neutral-300" id="spec-uptime">{firstVm.uptime ? formatUptime(firstVm.uptime) : "-"}</span></div>
+                        </>
+                    ) : <span class="text-neutral-600">Select a VM</span>}
+                </div>
+            </div>
+
+            <!-- Configuration -->
+            <div class="px-4 py-3 flex flex-col gap-3">
+                <p class="text-sm text-neutral-300">System Configuration</p>
+                <label class="flex flex-col gap-1">
+                    <span class="text-xs text-neutral-500">vCPUs</span>
+                    <input id="cfg-vcpus" type="number" min="1" max="32"
+                        class="bg-neutral-800 border border-neutral-600 rounded-xs px-2 py-1 text-xs text-neutral-200 focus:outline-none focus:border-blue-400 w-full"
+                        placeholder="—" disabled />
+                </label>
+                <label class="flex flex-col gap-1">
+                    <span class="text-xs text-neutral-500">Memory (MB)</span>
+                    <input id="cfg-mem" type="number" min="256" step="256"
+                        class="bg-neutral-800 border border-neutral-600 rounded-xs px-2 py-1 text-xs text-neutral-200 focus:outline-none focus:border-blue-400 w-full"
+                        placeholder="—" disabled />
+                </label>
+                <label class="flex flex-col gap-1">
+                    <span class="text-xs text-neutral-500">Description</span>
+                    <textarea id="cfg-desc" rows="2"
+                        class="bg-neutral-800 border border-neutral-600 rounded-xs px-2 py-1 text-xs text-neutral-200 focus:outline-none focus:border-blue-400 w-full resize-none"
+                        placeholder="—" disabled></textarea>
+                </label>
+                <button id="cfg-save"
+                    class="hidden mt-1 px-3 py-1.5 rounded text-xs bg-blue-500 hover:bg-blue-600 text-white transition cursor-pointer">
+                    Apply changes
+                </button>
+            </div>
+        </div>
+
+        <!-- MAIN PANEL -->
+        <div class="flex-1 flex flex-col overflow-hidden">
+            <!-- Console -->
+            <div class="flex-1 bg-black flex items-center justify-center min-h-0 relative">
+                <div id="console-placeholder" class={`flex flex-col items-center gap-3 text-neutral-600${firstVm?.status === "running" ? " hidden" : ""}`}>
+                    <p class="text-sm">{firstVm && firstVm.status !== "running" ? `VM is ${firstVm.status}` : "Select a VM to open console"}</p>
+                </div>
+                <iframe
+                    id="console-frame"
+                    class={`w-full h-full border-0${firstVm?.status === "running" ? "" : " hidden"}`}
+                    src={firstVm?.status === "running" ? vmConsoleUrl(firstVm) : undefined}
+                    title="VM Console"
+                ></iframe>
+                <div id="console-header" class={`absolute top-2 left-3 text-xs text-neutral-400 bg-black/60 px-2 py-1 rounded${firstVm?.status === "running" ? "" : " hidden"}`}>
+                    {firstVm?.status === "running" ? `${vmDisplayName(firstVm)} — ${firstVm.status}` : ""}
+                </div>
+            </div>
+            <!-- Logs -->
+            <div class="h-48 border-t border-neutral-600 shrink-0 flex flex-col bg-neutral-900">
+                <p class="text-sm text-neutral-400 px-4 pt-3 pb-2">Logs</p>
+                <div id="vm-log" class="font-mono text-xs text-neutral-500 whitespace-pre-wrap overflow-y-auto px-4 pb-3">Select a VM to view logs.</div>
+            </div>
+        </div>
+    </div>
+</Default>
+
+<script>
+    // Console elements
+    const frame           = document.getElementById("console-frame") as HTMLIFrameElement;
+    const placeholder     = document.getElementById("console-placeholder")!;
+    const placeholderText = placeholder.querySelector("p")!;
+    const header          = document.getElementById("console-header")!;
+
+    // Detail sidebar elements
+    const detailName   = document.getElementById("detail-name")!;
+    const detailStatus = document.getElementById("detail-status")!;
+    const specCpu      = document.getElementById("spec-cpu")!;
+    const specMem      = document.getElementById("spec-mem")!;
+    const specDisk     = document.getElementById("spec-disk")!;
+    const specUptime   = document.getElementById("spec-uptime")!;
+    const cfgVcpus     = document.getElementById("cfg-vcpus") as HTMLInputElement;
+    const cfgMem       = document.getElementById("cfg-mem")   as HTMLInputElement;
+    const cfgDesc      = document.getElementById("cfg-desc")  as HTMLTextAreaElement;
+    const cfgSave      = document.getElementById("cfg-save")!;
+
+    const vmRows = document.querySelectorAll<HTMLElement>(".vm-row");
+
+    let activeVmid: string | null = null;
+
+    function selectVm(row: HTMLElement): void {
+        const { vmid, name, status, statusClass, consoleUrl, cpu, mem, disk, uptime } = row.dataset;
+
+        activeVmid = vmid ?? null;
+        vmRows.forEach(r => r.classList.toggle("bg-neutral-700", r === row));
+
+        // Detail sidebar — header
+        detailName.textContent = name ?? "—";
+        detailStatus.textContent = status ?? "—";
+        detailStatus.className = `text-xs ${status === "running" ? "text-green-400" : "text-neutral-500"}`;
+
+        // Specs
+        specCpu.textContent    = cpu    ?? "—";
+        specMem.textContent    = mem    ?? "—";
+        specDisk.textContent   = disk   ?? "—";
+        specUptime.textContent = uptime ?? "—";
+
+        // Config inputs — enable and populate
+        cfgVcpus.disabled = false;
+        cfgMem.disabled   = false;
+        cfgDesc.disabled  = false;
+        cfgSave.classList.remove("hidden");
+
+        // Console
+        const isRunning = status === "running";
+        frame.classList.toggle("hidden", !isRunning);
+        placeholder.classList.toggle("hidden", isRunning);
+        header.classList.toggle("hidden", !isRunning);
+
+        if (isRunning) {
+            frame.src = consoleUrl!;
+            header.textContent = `${name} — ${status}`;
+        } else {
+            placeholderText.textContent = `VM is ${status}`;
+        }
+    }
+
+    vmRows.forEach(btn => btn.addEventListener("click", () => selectVm(btn)));
+
+    // Power controls
+    document.querySelectorAll<HTMLElement>(".power-btn").forEach(btn => {
+        btn.addEventListener("click", async () => {
+            if (!activeVmid) return;
+            const action = btn.dataset.power!;
+            console.log(`Power action "${action}" on VM ${activeVmid}`);
+            // TODO: await fetch(`/api/vms/${activeVmid}/${action}`, { method: "POST" });
+        });
+    });
+
+    // Config save
+    cfgSave.addEventListener("click", () => {
+        if (!activeVmid) return;
+        const payload = {
+            vcpus: cfgVcpus.value,
+            memory: cfgMem.value,
+            description: cfgDesc.value,
+        };
+        console.log(`Save config for VM ${activeVmid}`, payload);
+        // TODO: await fetch(`/api/vms/${activeVmid}/config`, { method: "PATCH", body: JSON.stringify(payload) });
+    });
+</script>

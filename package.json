@@ -9,10 +9,12 @@
     "astro": "astro"
   },
   "dependencies": {
+    "@novnc/novnc": "^1.6.0",
     "@tailwindcss/vite": "^4.2.1",
     "astro": "^5.17.1",
     "better-auth": "^1.5.2",
     "better-sqlite3": "^12.6.2",
+    "echarts": "^6.0.0",
     "tailwindcss": "^4.2.1",
     "undici": "^7.22.0"
   },

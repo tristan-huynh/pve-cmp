@@ -5,7 +5,7 @@ import { auth } from "../lib/auth";
 const session = await auth.api.getSession({ headers: Astro.request.headers });
 const user = session?.user;
 ---
-<nav class="bg-neutral-700 absolute top-0 left-0 right-0 w-full p-1 z-20">
+<nav class="bg-neutral-800 border-b border-neutral-600 absolute top-0 left-0 right-0 w-full p-1 z-20">
     <div class="flex items-center justify-between">
         <!-- logo -->
         <a href="/" class="group">
