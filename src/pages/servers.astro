@@ -128,6 +128,7 @@ const firstVm = vms[0] ?? null;
                         <button
                             class={`border-neutral-600 hover:bg-neutral-700 flex flex-row items-center vm-row w-full text-left px-4 py-3 border-b transition gap-3${i === 0 ? " bg-neutral-700" : ""}`}
                             data-vmid={vm.vmid}
+                            data-node={vm.node}
                             data-name={name}
                             data-status={vm.status}
                             data-status-class={statusCls}
@@ -243,9 +244,6 @@ const firstVm = vms[0] ?? null;
                     src={firstVm?.status === "running" ? vmConsoleUrl(firstVm) : undefined}
                     title="VM Console"
                 ></iframe>
-                <div id="console-header" class={`absolute top-2 left-3 text-xs text-neutral-400 bg-black/60 px-2 py-1 rounded${firstVm?.status === "running" ? "" : " hidden"}`}>
-                    {firstVm?.status === "running" ? `${vmDisplayName(firstVm)} — ${firstVm.status}` : ""}
-                </div>
             </div>
             <!-- Logs -->
             <div class="h-48 border-t border-neutral-600 shrink-0 flex flex-col bg-neutral-900">
@@ -260,16 +258,15 @@ const firstVm = vms[0] ?? null;
     // Console elements
     const frame           = document.getElementById("console-frame") as HTMLIFrameElement;
     const placeholder     = document.getElementById("console-placeholder")!;
-    const placeholderText = placeholder.querySelector("p")!;
-    const header          = document.getElementById("console-header")!;
+    const placeholderText = placeholder.querySelector("p")!;;
 
     // Detail sidebar elements
     const detailName   = document.getElementById("detail-name")!;
     const detailStatus = document.getElementById("detail-status")!;
-    const specCpu      = document.getElementById("spec-cpu")!;
-    const specMem      = document.getElementById("spec-mem")!;
-    const specDisk     = document.getElementById("spec-disk")!;
-    const specUptime   = document.getElementById("spec-uptime")!;
+    const specCpu      = document.getElementById("spec-cpu");
+    const specMem      = document.getElementById("spec-mem");
+    const specDisk     = document.getElementById("spec-disk");
+    const specUptime   = document.getElementById("spec-uptime");;
     const cfgVcpus     = document.getElementById("cfg-vcpus") as HTMLInputElement;
     const cfgMem       = document.getElementById("cfg-mem")   as HTMLInputElement;
     const cfgDesc      = document.getElementById("cfg-desc")  as HTMLTextAreaElement;
@@ -278,11 +275,13 @@ const firstVm = vms[0] ?? null;
     const vmRows = document.querySelectorAll<HTMLElement>(".vm-row");
 
     let activeVmid: string | null = null;
+    let activeNode:  string | null = null;
 
     function selectVm(row: HTMLElement): void {
         const { vmid, name, status, statusClass, consoleUrl, cpu, mem, disk, uptime } = row.dataset;
 
         activeVmid = vmid ?? null;
+        activeNode  = row.dataset.node ?? null;
         vmRows.forEach(r => r.classList.toggle("bg-neutral-700", r === row));
 
         // Detail sidebar — header
@@ -291,10 +290,10 @@ const firstVm = vms[0] ?? null;
         detailStatus.className = `text-xs ${status === "running" ? "text-green-400" : "text-neutral-500"}`;
 
         // Specs
-        specCpu.textContent    = cpu    ?? "—";
-        specMem.textContent    = mem    ?? "—";
-        specDisk.textContent   = disk   ?? "—";
-        specUptime.textContent = uptime ?? "—";
+        if (specCpu)    specCpu.textContent    = cpu    ?? "—";
+        if (specMem)    specMem.textContent    = mem    ?? "—";
+        if (specDisk)   specDisk.textContent   = disk   ?? "—";
+        if (specUptime) specUptime.textContent = uptime ?? "—";
 
         // Config inputs — enable and populate
         cfgVcpus.disabled = false;
@@ -306,11 +305,9 @@ const firstVm = vms[0] ?? null;
         const isRunning = status === "running";
         frame.classList.toggle("hidden", !isRunning);
         placeholder.classList.toggle("hidden", isRunning);
-        header.classList.toggle("hidden", !isRunning);
 
         if (isRunning) {
             frame.src = consoleUrl!;
-            header.textContent = `${name} — ${status}`;
         } else {
             placeholderText.textContent = `VM is ${status}`;
         }
@@ -319,12 +316,50 @@ const firstVm = vms[0] ?? null;
     vmRows.forEach(btn => btn.addEventListener("click", () => selectVm(btn)));
 
     // Power controls
-    document.querySelectorAll<HTMLElement>(".power-btn").forEach(btn => {
+    const powerBtns = document.querySelectorAll<HTMLButtonElement>(".power-btn");
+
+    function setStatus(status: string) {
+        const isRunning = status === "running";
+        detailStatus.textContent = status;
+        detailStatus.className = `text-xs ${isRunning ? "text-green-400" : "text-neutral-500"}`;
+        // Update the dot on the active vm-row
+        const activeRow = document.querySelector<HTMLElement>(`.vm-row[data-vmid="${activeVmid}"]`);
+        activeRow?.querySelector("span")?.classList.toggle("bg-green-400", isRunning);
+        activeRow?.querySelector("span")?.classList.toggle("bg-red-400", !isRunning);
+        if (activeRow) activeRow.dataset.status = status;
+    }
+
+    powerBtns.forEach(btn => {
         btn.addEventListener("click", async () => {
-            if (!activeVmid) return;
+            if (!activeVmid || !activeNode) return;
             const action = btn.dataset.power!;
-            console.log(`Power action "${action}" on VM ${activeVmid}`);
-            // TODO: await fetch(`/api/vms/${activeVmid}/${action}`, { method: "POST" });
+
+            // Disable all power buttons while request is in flight
+            powerBtns.forEach(b => { b.disabled = true; b.classList.add("opacity-50"); });
+            const original = btn.textContent!.trim();
+            btn.textContent = "Working…";
+
+            try {
+                const res = await fetch("/api/vms/power", {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({ vmid: activeVmid, node: activeNode, action }),
+                });
+                const data = await res.json();
+                if (!res.ok) throw new Error(data.error ?? res.statusText);
+
+                // Optimistically update the displayed status
+                const nextStatus =
+                    action === "start"    ? "running" :
+                    action === "stop"     ? "stopped"  :
+                    action === "shutdown" ? "stopped"  : "running"; // reboot → running
+                setStatus(nextStatus);
+            } catch (e) {
+                alert(`Power action failed: ${e instanceof Error ? e.message : e}`);
+            } finally {
+                powerBtns.forEach(b => { b.disabled = false; b.classList.remove("opacity-50"); });
+                btn.textContent = original;
+            }
         });
     });
 

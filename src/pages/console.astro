@@ -1,0 +1,158 @@
+---
+import { auth } from "../lib/auth";
+
+const session = await auth.api.getSession({ headers: Astro.request.headers });
+if (!session) return Astro.redirect("/sign-in");
+
+const vmid  = Number(Astro.url.searchParams.get("vmid"));
+const node  = Astro.url.searchParams.get("node") ?? "";
+const name  = Astro.url.searchParams.get("name") ?? `VM ${vmid}`;
+
+if (!vmid || !node) return Astro.redirect("/servers");
+---
+
+<!doctype html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>{name} � Console</title>
+    <style>
+        *, *::before, *::after { box-sizing: border-box; }
+        html, body { height: 100%; margin: 0; background: #000; overflow: hidden; }
+        #screen { width: 100%; height: 100%; }
+        #screen > canvas { display: block; }
+        #overlay {
+            position: fixed; inset: 0; display: flex; flex-direction: column;
+            align-items: center; justify-content: center; gap: 0.75rem;
+            background: #111; color: #9ca3af;
+            font-family: monospace; font-size: 0.85rem;
+            padding: 2rem; text-align: center;
+            pointer-events: none;
+        }
+        #overlay.hidden { display: none; }
+        #overlay.error  { color: #f87171; }
+        #overlay .icon  { font-size: 2rem; }
+        #status {
+            position: fixed; bottom: 0.75rem; left: 50%; transform: translateX(-50%);
+            background: rgba(0,0,0,0.75); color: #9ca3af;
+            font-family: monospace; font-size: 0.7rem;
+            padding: 0.2rem 0.8rem; border-radius: 999px;
+            pointer-events: none; transition: opacity 0.5s;
+        }
+        #status.fade { opacity: 0; }
+    </style>
+</head>
+<body>
+
+<div id="screen"></div>
+
+<div id="overlay">
+    <span class="icon">?</span>
+    <span id="overlay-msg">Requesting VNC session�</span>
+</div>
+
+<div id="status" class="fade">Connecting�</div>
+
+<div id="vnc-data" hidden
+    data-vmid={String(vmid)}
+    data-node={node}
+    data-name={name}
+></div>
+
+<script
+    type="module"
+>
+    import RFB from "/noVNC-1.7.0-beta/core/rfb.js";
+
+    const d      = document.getElementById("vnc-data").dataset;
+    const vmid   = d.vmid;
+    const node   = d.node;
+    const vmName = d.name;
+
+    const overlay    = document.getElementById("overlay");
+    const overlayMsg = document.getElementById("overlay-msg");
+    const status     = document.getElementById("status");
+
+    let fadeTimer;
+    function setStatus(msg, autohide = false) {
+        status.textContent = msg;
+        status.classList.remove("fade");
+        clearTimeout(fadeTimer);
+        if (autohide) fadeTimer = setTimeout(() => status.classList.add("fade"), 2500);
+    }
+
+    function showError(msg) {
+        overlay.className = "error";
+        overlay.innerHTML = `<span class="icon">?</span><strong>VNC Error</strong><span>${msg}</span>`;
+    }
+
+    // 1. Fetch a ticket + session token from our API (server calls PVE vncproxy)
+    let ticket, sessionToken;
+    try {
+        const res = await fetch(`/api/vnc/ticket?vmid=${vmid}&node=${encodeURIComponent(node)}`);
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.error ?? res.statusText);
+        ticket      = data.ticket;
+        sessionToken = data.sessionToken;
+    } catch (e) {
+        showError(`Failed to get VNC ticket: ${e.message}`);
+        throw e;
+    }
+
+    // 2. Build WebSocket URL � use our proxy so IP matches the vncproxy call
+    overlayMsg.textContent = `Connecting to ${vmName}�`;
+    const wsProto = location.protocol === 'https:' ? 'wss' : 'ws';
+    const wsUrl = sessionToken
+        ? `${wsProto}://${location.host}/api/vnc/ws?session=${encodeURIComponent(sessionToken)}`
+        : null;
+
+    if (!wsUrl) {
+        showError("VNC proxy not available (session token missing).");
+        throw new Error("No session token");
+    }
+
+    // 3. Connect noVNC through the proxy; supply the ticket as the VNC password
+    let rfb;
+    try {
+        rfb = new RFB(document.getElementById("screen"), wsUrl, {
+            credentials: { password: ticket },
+        });
+    } catch (e) {
+        showError(`noVNC init failed: ${e}`);
+        throw e;
+    }
+
+    rfb.scaleViewport = true;
+    rfb.resizeSession = true;
+
+    rfb.addEventListener("connect", () => {
+        overlay.classList.add("hidden");
+        setStatus(`Connected to ${node} / VM ${vmid}`, true);
+    });
+
+    rfb.addEventListener("disconnect", (e) => {
+        overlay.classList.remove("hidden", "error");
+        if (e.detail?.clean) {
+            overlay.innerHTML = `<span class="icon">??</span><span>Disconnected</span>`;
+            setStatus("Disconnected");
+        } else {
+            overlay.classList.add("error");
+            overlay.innerHTML = `<span class="icon">?</span><strong>Connection lost</strong><span>Reload the page to reconnect.</span>`;
+            setStatus("Connection lost");
+        }
+    });
+
+    rfb.addEventListener("credentialsrequired", () => rfb.sendCredentials({ password: ticket }));
+
+    rfb.addEventListener("securityfailure", (e) => {
+        overlay.classList.add("error");
+        overlay.classList.remove("hidden");
+        overlay.innerHTML = `<span class="icon">??</span><strong>Authentication failed</strong><span>${e.detail?.reason ?? "Security failure"}</span>`;
+    });
+
+    window.addEventListener("resize", () => { if (rfb) rfb.scaleViewport = true; });
+</script>
+
+</body>
+</html>

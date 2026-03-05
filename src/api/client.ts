@@ -49,6 +49,14 @@ export async function stopVM(node: string, vmid: number) {
     return pveRequest(`/nodes/${node}/qemu/${vmid}/status/stop`, { method: "POST" });
 }
 
+export async function shutdownVM(node: string, vmid: number) {
+    return pveRequest(`/nodes/${node}/qemu/${vmid}/status/shutdown`, { method: "POST" });
+}
+
+export async function rebootVM(node: string, vmid: number) {
+    return pveRequest(`/nodes/${node}/qemu/${vmid}/status/reboot`, { method: "POST" });
+}
+
 export async function getVNCProxy(node: string, vmid: number) {
     return pveRequest<{ ticket: string; port: number; cert?: string }>(
         `/nodes/${node}/qemu/${vmid}/vncproxy`,
