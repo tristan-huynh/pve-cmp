@@ -60,6 +60,19 @@ export async function getStorage(node: string) {
     return pveRequest<PVEStorage[]>(`/nodes/${node}/storage`);
 }
 
+export async function getVMConfig(node: string, vmid: number) {
+    return pveRequest<PVEVMConfig>(`/nodes/${node}/qemu/${vmid}/config`);
+}
+
+export interface PVEVMConfig {
+    cores?: number;
+    sockets?: number;
+    memory?: number;
+    description?: string;
+    name?: string;
+    [key: string]: unknown;
+}
+
 export async function getPools() {
     return pveRequest<PVEPool[]>("/pools");
 }

@@ -1,6 +1,6 @@
 import type { APIRoute } from "astro";
-import { auth } from "../../lib/auth";
-import { getPools, getPool, getVMStatus } from "../../api/client";
+import { auth } from "../../../lib/auth";
+import { getPools, getPool, getVMStatus } from "../../../api/client";
 
 export const GET: APIRoute = async ({ request }) => {
     const session = await auth.api.getSession({ headers: request.headers });

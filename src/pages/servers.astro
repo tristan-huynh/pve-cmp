@@ -128,6 +128,7 @@ const firstVm = vms[0] ?? null;
                         <button
                             class={`border-neutral-600 hover:bg-neutral-700 flex flex-row items-center vm-row w-full text-left px-4 py-3 border-b transition gap-3${i === 0 ? " bg-neutral-700" : ""}`}
                             data-vmid={vm.vmid}
+                            data-node={vm.node}
                             data-name={name}
                             data-status={vm.status}
                             data-status-class={statusCls}
@@ -148,6 +149,11 @@ const firstVm = vms[0] ?? null;
                         </button>
                     );
                 })}
+            </div>
+
+            <div class="mt-auto border-t border-neutral-700 px-4 py-2 flex items-center gap-2 sticky bottom-0 bg-neutral-900">
+                <span id="tick-dot" class="h-2 w-2 rounded-full bg-neutral-500 shrink-0 transition-colors"></span>
+                <span id="tick-label" class="text-xs text-neutral-500">Waiting for update…</span>
             </div>
         </div>
 
@@ -224,7 +230,7 @@ const firstVm = vms[0] ?? null;
                         placeholder="—" disabled></textarea>
                 </label>
                 <button id="cfg-save"
-                    class="hidden mt-1 px-3 py-1.5 rounded text-xs bg-blue-500 hover:bg-blue-600 text-white transition cursor-pointer">
+                    class="hidden mt-1 px-3 py-1.5 rounded-xs text-xs bg-blue-400 hover:bg-blue-500 text-white transition cursor-pointer">
                     Apply changes
                 </button>
             </div>
@@ -275,32 +281,53 @@ const firstVm = vms[0] ?? null;
     const cfgDesc      = document.getElementById("cfg-desc")  as HTMLTextAreaElement;
     const cfgSave      = document.getElementById("cfg-save")!;
 
+    const POLL_MS = 5_000;
+    const tickDot   = document.getElementById("tick-dot")!;
+    const tickLabel = document.getElementById("tick-label")!;
+
     const vmRows = document.querySelectorAll<HTMLElement>(".vm-row");
 
     let activeVmid: string | null = null;
 
-    function selectVm(row: HTMLElement): void {
-        const { vmid, name, status, statusClass, consoleUrl, cpu, mem, disk, uptime } = row.dataset;
+    async function selectVm(row: HTMLElement): Promise<void> {
+        const { vmid, node, name, status, statusClass, consoleUrl, cpu, mem, disk, uptime } = row.dataset;
 
         activeVmid = vmid ?? null;
         vmRows.forEach(r => r.classList.toggle("bg-neutral-700", r === row));
 
-        // Detail sidebar — header
         detailName.textContent = name ?? "—";
         detailStatus.textContent = status ?? "—";
         detailStatus.className = `text-xs ${status === "running" ? "text-green-400" : "text-neutral-500"}`;
 
-        // Specs
         specCpu.textContent    = cpu    ?? "—";
         specMem.textContent    = mem    ?? "—";
         specDisk.textContent   = disk   ?? "—";
         specUptime.textContent = uptime ?? "—";
 
-        // Config inputs — enable and populate
+        // Config inputs — reset while loading
+        cfgVcpus.disabled = true;
+        cfgMem.disabled   = true;
+        cfgDesc.disabled  = true;
+        cfgVcpus.value = "";
+        cfgMem.value   = "";
+        cfgDesc.value  = "";
+        cfgSave.classList.remove("hidden");
+
+        // Fetch VM config and pre-populate
+        if (vmid && node) {
+            try {
+                const res = await fetch(`/api/vms/config?vmid=${vmid}&node=${encodeURIComponent(node)}`);
+                if (res.ok) {
+                    const { config } = await res.json();
+                    cfgVcpus.value = String((config.cores ?? 1) * (config.sockets ?? 1));
+                    cfgMem.value   = String(config.memory ?? "");
+                    cfgDesc.value  = config.description ?? "";
+                }
+            } catch { }
+        }
         cfgVcpus.disabled = false;
         cfgMem.disabled   = false;
         cfgDesc.disabled  = false;
-        cfgSave.classList.remove("hidden");
 
         // Console
         const isRunning = status === "running";
@@ -316,7 +343,63 @@ const firstVm = vms[0] ?? null;
         }
     }
 
-    vmRows.forEach(btn => btn.addEventListener("click", () => selectVm(btn)));
+    vmRows.forEach(btn => btn.addEventListener("click", () => void selectVm(btn)));
+
+    if (vmRows.length > 0) void selectVm(vmRows[0] as HTMLElement);
+
+    function fmtUptime(s: number): string {
+        const d = Math.floor(s / 86400);
+        const h = Math.floor((s % 86400) / 3600);
+        const m = Math.floor((s % 3600) / 60);
+        return `${d}d ${h}h ${m}m`;
+    }
+
+    async function pollVMs(): Promise<void> {
+        try {
+            const res = await fetch("/api/vms");
+            if (!res.ok) throw new Error(res.statusText);
+            const { vms = [] }: { vms: any[] } = await res.json();
+
+            for (const vm of vms) {
+                const row = document.querySelector<HTMLElement>(`.vm-row[data-vmid="${vm.vmid}"]`);
+                if (!row) continue;
+
+                const cpu    = `${(vm.cpu * 100).toFixed(1)}%`;
+                const mem    = `${(vm.mem / 1024 ** 3).toFixed(2)} / ${(vm.maxmem / 1024 ** 3).toFixed(2)} GB`;
+                const disk   = `${(vm.maxdisk / 1024 ** 3).toFixed(1)} GB`;
+                const uptime = vm.uptime ? fmtUptime(vm.uptime) : "-";
+
+                row.dataset.status    = vm.status;
+                row.dataset.statusClass = vm.status === "running" ? "text-green-400" : "text-neutral-400";
+                row.dataset.cpu    = cpu;
+                row.dataset.mem    = mem;
+                row.dataset.disk   = disk;
+                row.dataset.uptime = uptime;
+
+                const dot = row.querySelector<HTMLElement>("span.rounded-full");
+                if (dot) dot.className = `h-2 w-2 rounded-full shrink-0 ${vm.status === "running" ? "bg-green-400" : "bg-red-400"}`;
+
+                const summary = row.querySelector<HTMLElement>("p.text-neutral-500");
+                if (summary) summary.textContent =
+                    `${(vm.cpu * 100).toFixed(1)}% CPU · ${(vm.mem / 1024 ** 3).toFixed(1)}/${(vm.maxmem / 1024 ** 3).toFixed(1)}GB · ${((vm.uptime ?? 0) / 86400).toFixed(1)}d`;
+
+                if (activeVmid === String(vm.vmid)) {
+                    detailStatus.textContent = vm.status;
+                    detailStatus.className   = `text-xs ${vm.status === "running" ? "text-green-400" : "text-neutral-500"}`;
+                    specCpu.textContent    = cpu;
+                    specMem.textContent    = mem;
+                    specDisk.textContent   = disk;
+                    specUptime.textContent = uptime;
+                }
+            }
+
+            tickDot.className   = "h-2 w-2 rounded-full bg-green-400 shrink-0 transition-colors";
+            tickLabel.textContent = `Updated ${new Date().toLocaleTimeString()}`;
+        } catch {
+            tickDot.className   = "h-2 w-2 rounded-full bg-red-400 shrink-0 transition-colors";
+            tickLabel.textContent = "Update failed";
+        }
+    }
 
     // Power controls
     document.querySelectorAll<HTMLElement>(".power-btn").forEach(btn => {
@@ -339,4 +422,7 @@ const firstVm = vms[0] ?? null;
         console.log(`Save config for VM ${activeVmid}`, payload);
         // TODO: await fetch(`/api/vms/${activeVmid}/config`, { method: "PATCH", body: JSON.stringify(payload) });
     });
+    pollVMs();
+    setInterval(pollVMs, POLL_MS);
+
 </script>
