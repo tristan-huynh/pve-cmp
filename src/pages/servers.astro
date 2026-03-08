@@ -50,7 +50,7 @@ function formatUptime(s: number): string {
 }
 
 function vmDisplayName(vm: PVEVMStatus & { node: string }): string {
-    return vm.name ?? `VM ${vm.vmid}`;
+    return vm.name ?? "Virtual Machine";
 }
 
 function vmConsoleUrl(vm: PVEVMStatus & { node: string }): string {
@@ -84,24 +84,24 @@ const firstVm = vms[0] ?? null;
                     </div>
                     <div class="text-neutral-300 text-xs">
                         <div class="flex justify-between">
-                            <span>Memory</span><span>{totalMemGb.toFixed(1)} GB / 64 GB</span>
+                            <span>Memory</span><span>{totalMemGb.toFixed(1)} GB / 32 GB</span>
                         </div>
                         <div class="w-full bg-neutral-700 rounded h-1.5">
-                            <div class="bg-purple-400 h-1.5 rounded" style={`width:${Math.min((totalMemGb/64)*100,100).toFixed(0)}%`}></div>
+                            <div class="bg-purple-400 h-1.5 rounded" style={`width:${Math.min((totalMemGb/32)*100,100).toFixed(0)}%`}></div>
                         </div>
                     </div>
                     <div class="text-neutral-300 text-xs">
                         <div class="flex justify-between">
-                            <span>Disk</span><span>{totalDiskGb.toFixed(0)} GB / 500 GB</span>
+                            <span>Disk</span><span>{totalDiskGb.toFixed(0)} GB / 200 GB</span>
                         </div>
                         <div class="w-full bg-neutral-700 rounded h-1.5">
-                            <div class="bg-amber-400 h-1.5 rounded" style={`width:${Math.min((totalDiskGb/500)*100,100).toFixed(0)}%`}></div>
+                            <div class="bg-amber-400 h-1.5 rounded" style={`width:${Math.min((totalDiskGb/200)*100,100).toFixed(0)}%`}></div>
                         </div>
                     </div>
                 </div>
             </div>
 
-            <div class="flex flex-col overflow-y-auto">
+            <div id="vm-list" class="flex flex-col overflow-y-auto">
                 <div class="flex items-center justify-between px-4 pt-4 pb-2">
                     <p class="text-md text-neutral-300">Virtual Machines</p>
                     <button
@@ -215,24 +215,30 @@ const firstVm = vms[0] ?? null;
                     <span class="text-xs text-neutral-500">vCPUs</span>
                     <input id="cfg-vcpus" type="number" min="1" max="32"
                         class="bg-neutral-800 border border-neutral-600 rounded-xs px-2 py-1 text-xs text-neutral-200 focus:outline-none focus:border-blue-400 w-full"
-                        placeholder="—" disabled />
+                        placeholder="" disabled />
                 </label>
                 <label class="flex flex-col gap-1">
                     <span class="text-xs text-neutral-500">Memory (MB)</span>
                     <input id="cfg-mem" type="number" min="256" step="256"
                         class="bg-neutral-800 border border-neutral-600 rounded-xs px-2 py-1 text-xs text-neutral-200 focus:outline-none focus:border-blue-400 w-full"
-                        placeholder="—" disabled />
+                        placeholder="" disabled />
                 </label>
                 <label class="flex flex-col gap-1">
-                    <span class="text-xs text-neutral-500">Description</span>
+                    <span class="text-xs text-neutral-500">Notes</span>
                     <textarea id="cfg-desc" rows="2"
                         class="bg-neutral-800 border border-neutral-600 rounded-xs px-2 py-1 text-xs text-neutral-200 focus:outline-none focus:border-blue-400 w-full resize-none"
-                        placeholder="—" disabled></textarea>
+                        placeholder="" disabled></textarea>
                 </label>
                 <button id="cfg-save"
                     class="hidden mt-1 px-3 py-1.5 rounded-xs text-xs bg-blue-400 hover:bg-blue-500 text-white transition cursor-pointer">
                     Apply changes
                 </button>
+                <div class="mt-4 pt-4 border-t border-neutral-700">
+                    <button id="cfg-delete"
+                        class="w-full px-3 py-1.5 rounded-xs text-xs bg-transparent border border-red-500 text-red-400 hover:bg-red-500 hover:text-white transition cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed" disabled>
+                        Delete VM
+                    </button>
+                </div>
             </div>
         </div>
 
@@ -262,6 +268,121 @@ const firstVm = vms[0] ?? null;
     </div>
 </Default>
 
+<!-- Restart reminder modal -->
+<div id="restart-modal" class="hidden fixed inset-0 z-50 flex items-center justify-center bg-black/60">
+    <div class="bg-neutral-800 border border-neutral-600 rounded-xs w-80 p-5 flex flex-col gap-4">
+        <div class="flex items-start gap-3">
+            <svg class="h-5 w-5 text-amber-400 shrink-0 mt-0.5" fill="currentColor" <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512"><!--!Font Awesome Free v7.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free Copyright 2026 Fonticons, Inc.--><path d="M256 0c14.7 0 28.2 8.1 35.2 21l216 400c6.7 12.4 6.4 27.4-.8 39.5S486.1 480 472 480L40 480c-14.1 0-27.2-7.4-34.4-19.5s-7.5-27.1-.8-39.5l216-400c7-12.9 20.5-21 35.2-21zm0 352a32 32 0 1 0 0 64 32 32 0 1 0 0-64zm0-192c-18.2 0-32.7 15.5-31.4 33.7l7.4 104c.9 12.5 11.4 22.3 23.9 22.3 12.6 0 23-9.7 23.9-22.3l7.4-104c1.3-18.2-13.1-33.7-31.4-33.7z"/></svg>
+            <div>
+                <p class="text-sm font-medium text-neutral-100">Restart required</p>
+                <p class="text-xs text-neutral-400 mt-1">Configuration changes were saved, but this VM is currently running. The changes will take effect after the next restart.</p>
+            </div>
+        </div>
+        <div class="flex justify-end gap-2">
+            <button id="restart-modal-close" class="px-3 py-1.5 text-xs rounded-xs bg-neutral-700 hover:bg-neutral-600 text-neutral-200 transition cursor-pointer">Dismiss</button>
+            <button id="restart-modal-reboot" class="px-3 py-1.5 text-xs rounded-xs bg-amber-500 hover:bg-amber-400 text-neutral-800 transition cursor-pointer">Reboot now</button>
+        </div>
+    </div>
+</div>
+
+<!-- Force stop confirmation modal -->
+<div id="stop-modal" class="hidden fixed inset-0 z-50 flex items-center justify-center bg-black/60">
+    <div class="bg-neutral-800 border border-neutral-600 rounded-xs w-80 p-5 flex flex-col gap-4">
+        <div class="flex items-start gap-3">
+            <svg class="h-5 w-5 text-red-400 shrink-0 mt-0.5" fill="currentColor" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512"><!--!Font Awesome Free v7.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free Copyright 2026 Fonticons, Inc.--><path d="M256 512a256 256 0 1 0 0-512 256 256 0 1 0 0 512zM167 167c9.4-9.4 24.6-9.4 33.9 0l55 55 55-55c9.4-9.4 24.6-9.4 33.9 0s9.4 24.6 0 33.9l-55 55 55 55c9.4 9.4 9.4 24.6 0 33.9s-24.6 9.4-33.9 0l-55-55-55 55c-9.4 9.4-24.6 9.4-33.9 0s-9.4-24.6 0-33.9l55-55-55-55c-9.4-9.4-9.4-24.6 0-33.9z"/></svg>
+            <div>
+                <p class="text-sm font-medium text-neutral-100">Force stop?</p>
+                <p class="text-xs text-neutral-400 mt-1">This will immediately cut power to <span id="stop-modal-name" class="text-neutral-200"></span>. Unsaved work inside the VM will be lost.</p>
+            </div>
+        </div>
+        <div class="flex justify-end gap-2">
+            <button id="stop-modal-cancel" class="px-3 py-1.5 text-xs rounded-xs bg-neutral-700 hover:bg-neutral-600 text-neutral-200 transition cursor-pointer">Cancel</button>
+            <button id="stop-modal-confirm" class="px-3 py-1.5 text-xs rounded-xs bg-red-500 hover:bg-red-400 text-white transition cursor-pointer">Force Stop</button>
+        </div>
+    </div>
+</div>
+
+<!-- Delete VM confirmation modal -->
+<div id="delete-modal" class="hidden fixed inset-0 z-50 flex items-center justify-center bg-black/60">
+    <div class="bg-neutral-800 border border-neutral-600 rounded-xs w-80 p-5 flex flex-col gap-4">
+        <div class="flex items-start gap-3">
+            <svg class="h-5 w-5 text-red-400 shrink-0 mt-0.5" fill="currentColor" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><!--!Font Awesome Free v7.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free Copyright 2026 Fonticons, Inc.--><path d="M136.7 5.9L128 32 32 32C14.3 32 0 46.3 0 64S14.3 96 32 96l384 0c17.7 0 32-14.3 32-32s-14.3-32-32-32l-96 0-8.7-26.1C306.9-7.2 294.7-16 280.9-16L167.1-16c-13.8 0-26 8.8-30.4 21.9zM416 144L32 144 53.1 467.1C54.7 492.4 75.7 512 101 512L347 512c25.3 0 46.3-19.6 47.9-44.9L416 144z"/></svg>
+            <div>
+                <p class="text-sm font-medium text-neutral-100">Delete VM?</p>
+                <p class="text-xs text-neutral-400 mt-1">This will permanently destroy <span id="delete-modal-name" class="text-neutral-200"></span> and all its disks. This action cannot be undone.</p>
+            </div>
+        </div>
+        <div class="flex justify-end gap-2">
+            <button id="delete-modal-cancel" class="px-3 py-1.5 text-xs rounded-xs bg-neutral-700 hover:bg-neutral-600 text-neutral-200 transition cursor-pointer">Cancel</button>
+            <button id="delete-modal-confirm" class="px-3 py-1.5 text-xs rounded-xs bg-red-500 hover:bg-red-400 text-white transition cursor-pointer">Delete</button>
+        </div>
+    </div>
+</div>
+
+<!-- New VM modal -->
+<div id="new-vm-modal" class="hidden fixed inset-0 z-50 flex items-center justify-center bg-black/60">
+    <div class="bg-neutral-800 border border-neutral-600 rounded-xs w-96 p-5 flex flex-col gap-4">
+        <div class="flex items-center justify-between">
+            <p class="text-sm font-medium text-neutral-100">New Virtual Machine</p>
+            <button id="new-vm-close" class="text-neutral-500 hover:text-neutral-300 transition cursor-pointer">
+                <svg class="h-4 w-4" fill="currentColor" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 384 512"><path d="M342.6 150.6c12.5-12.5 12.5-32.8 0-45.3s-32.8-12.5-45.3 0L192 210.7 86.6 105.4c-12.5-12.5-32.8-12.5-45.3 0s-12.5 32.8 0 45.3L146.7 256 41.4 361.4c-12.5 12.5-12.5 32.8 0 45.3s32.8 12.5 45.3 0L192 301.3 297.4 406.6c12.5 12.5 32.8 12.5 45.3 0s12.5-32.8 0-45.3L237.3 256 342.6 150.6z"/></svg>
+            </button>
+        </div>
+
+        <div class="flex flex-col gap-3">
+            <label class="flex flex-col gap-1">
+                <span class="text-xs text-neutral-500">VM Name</span>
+                <input id="new-vm-name" type="text" maxlength="64"
+                    class="bg-neutral-900 border border-neutral-600 rounded-xs px-2 py-1.5 text-xs text-neutral-200 focus:outline-none focus:border-blue-400 w-full"
+                    placeholder="my-server" />
+            </label>
+
+            <label class="flex flex-col gap-1">
+                <span class="text-xs text-neutral-500">Node</span>
+                <select id="new-vm-node"
+                    class="bg-neutral-900 border border-neutral-600 rounded-xs px-2 py-1.5 text-xs text-neutral-200 focus:outline-none focus:border-blue-400 w-full cursor-pointer">
+                    <option value="">Loading nodes…</option>
+                </select>
+            </label>
+
+            <div class="grid grid-cols-2 gap-3">
+                <label class="flex flex-col gap-1">
+                    <span class="text-xs text-neutral-500">vCPUs</span>
+                    <input id="new-vm-cores" type="number" min="1" max="32" value="1"
+                        class="bg-neutral-900 border border-neutral-600 rounded-xs px-2 py-1.5 text-xs text-neutral-200 focus:outline-none focus:border-blue-400 w-full" />
+                </label>
+                <label class="flex flex-col gap-1">
+                    <span class="text-xs text-neutral-500">Memory (MB)</span>
+                    <input id="new-vm-memory" type="number" min="256" step="256" value="512"
+                        class="bg-neutral-900 border border-neutral-600 rounded-xs px-2 py-1.5 text-xs text-neutral-200 focus:outline-none focus:border-blue-400 w-full" />
+                </label>
+            </div>
+
+            <div class="grid grid-cols-2 gap-3">
+                <label class="flex flex-col gap-1">
+                    <span class="text-xs text-neutral-500">Storage</span>
+                    <select id="new-vm-storage"
+                        class="bg-neutral-900 border border-neutral-600 rounded-xs px-2 py-1.5 text-xs text-neutral-200 focus:outline-none focus:border-blue-400 w-full cursor-pointer">
+                        <option value="">Select node first</option>
+                    </select>
+                </label>
+                <label class="flex flex-col gap-1">
+                    <span class="text-xs text-neutral-500">Disk (GB)</span>
+                    <input id="new-vm-disk" type="number" min="1" max="500" value="8"
+                        class="bg-neutral-900 border border-neutral-600 rounded-xs px-2 py-1.5 text-xs text-neutral-200 focus:outline-none focus:border-blue-400 w-full" />
+                </label>
+            </div>
+        </div>
+
+        <p id="new-vm-error" class="hidden text-xs text-rose-400"></p>
+
+        <div class="flex justify-end gap-2">
+            <button id="new-vm-cancel" class="px-3 py-1.5 text-xs rounded-xs bg-neutral-700 hover:bg-neutral-600 text-neutral-200 transition cursor-pointer">Cancel</button>
+            <button id="new-vm-submit" class="px-3 py-1.5 text-xs rounded-xs bg-blue-500 hover:bg-blue-400 text-white transition cursor-pointer">Create VM</button>
+        </div>
+    </div>
+</div>
+
 <script>
     // Console elements
     const frame           = document.getElementById("console-frame") as HTMLIFrameElement;
@@ -280,20 +401,33 @@ const firstVm = vms[0] ?? null;
     const cfgMem       = document.getElementById("cfg-mem")   as HTMLInputElement;
     const cfgDesc      = document.getElementById("cfg-desc")  as HTMLTextAreaElement;
     const cfgSave      = document.getElementById("cfg-save")!;
+    const cfgDelete     = document.getElementById("cfg-delete") as HTMLButtonElement;
 
     const POLL_MS = 5_000;
     const tickDot   = document.getElementById("tick-dot")!;
     const tickLabel = document.getElementById("tick-label")!;
 
-    const vmRows = document.querySelectorAll<HTMLElement>(".vm-row");
+    const vmList = document.getElementById("vm-list")!;
 
     let activeVmid: string | null = null;
+    let activeNode: string | null = null;
+    let activeName: string | null = null;
+
+    const vmLog = document.getElementById("vm-log")!;
+    function log(msg: string, type: "info" | "ok" | "error" = "info") {
+        const color = type === "ok" ? "text-green-400" : type === "error" ? "text-rose-400" : "text-neutral-400";
+        const time  = new Date().toLocaleTimeString();
+        vmLog.innerHTML += `<span class="${color}">[${time}] ${msg}</span>\n`;
+        vmLog.scrollTop = vmLog.scrollHeight;
+    }
 
     async function selectVm(row: HTMLElement): Promise<void> {
         const { vmid, node, name, status, statusClass, consoleUrl, cpu, mem, disk, uptime } = row.dataset;
 
         activeVmid = vmid ?? null;
-        vmRows.forEach(r => r.classList.toggle("bg-neutral-700", r === row));
+        activeNode = node ?? null;
+        activeName = name ?? null;
+        document.querySelectorAll<HTMLElement>(".vm-row").forEach(r => r.classList.toggle("bg-neutral-700", r === row));
 
         detailName.textContent = name ?? "—";
         detailStatus.textContent = status ?? "—";
@@ -312,6 +446,7 @@ const firstVm = vms[0] ?? null;
         cfgMem.value   = "";
         cfgDesc.value  = "";
         cfgSave.classList.remove("hidden");
+        cfgDelete.disabled = false;
 
         // Fetch VM config and pre-populate
         if (vmid && node) {
@@ -343,9 +478,15 @@ const firstVm = vms[0] ?? null;
         }
     }
 
-    vmRows.forEach(btn => btn.addEventListener("click", () => void selectVm(btn)));
+    // Event delegation for VM row clicks
+    vmList.addEventListener("click", (e) => {
+        const row = (e.target as HTMLElement).closest<HTMLElement>(".vm-row");
+        if (row) void selectVm(row);
+    });
 
-    if (vmRows.length > 0) void selectVm(vmRows[0] as HTMLElement);
+    // Pre-select the first VM on load
+    const firstRow = document.querySelector<HTMLElement>(".vm-row");
+    if (firstRow) void selectVm(firstRow);
 
     function fmtUptime(s: number): string {
         const d = Math.floor(s / 86400);
@@ -354,22 +495,62 @@ const firstVm = vms[0] ?? null;
         return `${d}d ${h}h ${m}m`;
     }
 
+    function makeVmRow(vm: any): HTMLButtonElement {
+        const name       = vm.name ?? "Virtual Machine";
+        const isRunning  = vm.status === "running";
+        const cpu        = `${(vm.cpu * 100).toFixed(1)}%`;
+        const mem        = `${(vm.mem / 1024 ** 3).toFixed(2)} / ${(vm.maxmem / 1024 ** 3).toFixed(2)} GB`;
+        const disk       = `${(vm.maxdisk / 1024 ** 3).toFixed(1)} GB`;
+        const uptime     = vm.uptime ? fmtUptime(vm.uptime) : "-";
+        const consoleUrl = `/console?vmid=${vm.vmid}&node=${encodeURIComponent(vm.node)}&name=${encodeURIComponent(name)}`;
+
+        const btn = document.createElement("button");
+        btn.className = "border-neutral-600 hover:bg-neutral-700 flex flex-row items-center vm-row w-full text-left px-4 py-3 border-b transition gap-3";
+        Object.assign(btn.dataset, {
+            vmid: String(vm.vmid), node: vm.node, name, status: vm.status,
+            statusClass: isRunning ? "text-green-400" : "text-neutral-400",
+            consoleUrl, cpu, mem, disk, uptime,
+        });
+        btn.innerHTML = `
+            <span class="h-2 w-2 rounded-full shrink-0 ${isRunning ? "bg-green-400" : "bg-red-400"}"></span>
+            <div class="min-w-0">
+                <p class="text-sm text-neutral-200 truncate">${name}</p>
+                <p class="text-xs text-neutral-500">${(vm.cpu * 100).toFixed(1)}% CPU · ${(vm.mem / 1024 ** 3).toFixed(1)}/${(vm.maxmem / 1024 ** 3).toFixed(1)}GB · ${((vm.uptime ?? 0) / 86400).toFixed(1)}d</p>
+            </div>`;
+        return btn;
+    }
+
     async function pollVMs(): Promise<void> {
         try {
             const res = await fetch("/api/vms");
             if (!res.ok) throw new Error(res.statusText);
             const { vms = [] }: { vms: any[] } = await res.json();
 
-            for (const vm of vms) {
-                const row = document.querySelector<HTMLElement>(`.vm-row[data-vmid="${vm.vmid}"]`);
-                if (!row) continue;
+            const apiVmids = new Set(vms.map(v => String(v.vmid)));
 
+            // Remove rows for VMs no longer returned
+            document.querySelectorAll<HTMLElement>(".vm-row").forEach(row => {
+                if (!apiVmids.has(row.dataset.vmid!)) row.remove();
+            });
+
+            for (const vm of vms) {
+                const vmidStr = String(vm.vmid);
+                let row = document.querySelector<HTMLElement>(`.vm-row[data-vmid="${vm.vmid}"]`);
+
+                if (!row) {
+                    // New VM — create a row and append to the list
+                    row = makeVmRow(vm);
+                    vmList.appendChild(row);
+                    continue;
+                }
+
+                // Update existing row
                 const cpu    = `${(vm.cpu * 100).toFixed(1)}%`;
                 const mem    = `${(vm.mem / 1024 ** 3).toFixed(2)} / ${(vm.maxmem / 1024 ** 3).toFixed(2)} GB`;
                 const disk   = `${(vm.maxdisk / 1024 ** 3).toFixed(1)} GB`;
                 const uptime = vm.uptime ? fmtUptime(vm.uptime) : "-";
 
-                row.dataset.status    = vm.status;
+                row.dataset.status      = vm.status;
                 row.dataset.statusClass = vm.status === "running" ? "text-green-400" : "text-neutral-400";
                 row.dataset.cpu    = cpu;
                 row.dataset.mem    = mem;
@@ -383,7 +564,7 @@ const firstVm = vms[0] ?? null;
                 if (summary) summary.textContent =
                     `${(vm.cpu * 100).toFixed(1)}% CPU · ${(vm.mem / 1024 ** 3).toFixed(1)}/${(vm.maxmem / 1024 ** 3).toFixed(1)}GB · ${((vm.uptime ?? 0) / 86400).toFixed(1)}d`;
 
-                if (activeVmid === String(vm.vmid)) {
+                if (activeVmid === vmidStr) {
                     detailStatus.textContent = vm.status;
                     detailStatus.className   = `text-xs ${vm.status === "running" ? "text-green-400" : "text-neutral-500"}`;
                     specCpu.textContent    = cpu;
@@ -393,36 +574,271 @@ const firstVm = vms[0] ?? null;
                 }
             }
 
-            tickDot.className   = "h-2 w-2 rounded-full bg-green-400 shrink-0 transition-colors";
+            tickDot.className     = "h-2 w-2 rounded-full bg-green-400 shrink-0 transition-colors";
             tickLabel.textContent = `Updated ${new Date().toLocaleTimeString()}`;
         } catch {
-            tickDot.className   = "h-2 w-2 rounded-full bg-red-400 shrink-0 transition-colors";
+            tickDot.className     = "h-2 w-2 rounded-full bg-red-400 shrink-0 transition-colors";
             tickLabel.textContent = "Update failed";
         }
     }
 
+    // Restart reminder modal
+    const restartModal      = document.getElementById("restart-modal")!;
+    const restartModalClose  = document.getElementById("restart-modal-close")!;
+    const restartModalReboot = document.getElementById("restart-modal-reboot")!;
+    restartModalClose.addEventListener("click", () => restartModal.classList.add("hidden"));
+    restartModalReboot.addEventListener("click", async () => {
+        restartModal.classList.add("hidden");
+        if (!activeVmid || !activeNode) return;
+        log(`Sending "Reboot" to ${activeName}…`);
+        try {
+            const res = await fetch("/api/vms/power", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ vmid: Number(activeVmid), node: activeNode, action: "reboot" }),
+            });
+            const data = await res.json();
+            if (!res.ok) throw new Error(data.error ?? res.statusText);
+            log(`Reboot command accepted for ${activeName}.`, "ok");
+            await pollVMs();
+        } catch (e) {
+            log(`Reboot failed: ${e instanceof Error ? e.message : e}`, "error");
+        }
+    });
+
+    // Delete VM confirmation modal
+    const deleteModal        = document.getElementById("delete-modal")!;
+    const deleteModalName    = document.getElementById("delete-modal-name")!;
+    const deleteModalCancel  = document.getElementById("delete-modal-cancel")!;
+    const deleteModalConfirm = document.getElementById("delete-modal-confirm")!;
+
+    cfgDelete.addEventListener("click", () => {
+        if (!activeVmid) return;
+        deleteModalName.textContent = activeName ?? "this VM";
+        deleteModal.classList.remove("hidden");
+    });
+    deleteModalCancel.addEventListener("click", () => deleteModal.classList.add("hidden"));
+    deleteModalConfirm.addEventListener("click", async () => {
+        deleteModal.classList.add("hidden");
+        if (!activeVmid || !activeNode) return;
+        const name = activeName;
+        log(`Deleting ${name}…`);
+        deleteModalConfirm.disabled = true;
+        try {
+            const res = await fetch("/api/vms/delete", {
+                method: "DELETE",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ vmid: Number(activeVmid), node: activeNode }),
+            });
+            const data = await res.json();
+            if (!res.ok) throw new Error(data.error ?? res.statusText);
+            log(`${name} deleted successfully.`, "ok");
+            // Clear active selection
+            activeVmid = null;
+            activeNode = null;
+            activeName = null;
+            cfgDelete.disabled = true;
+            await pollVMs();
+            // Select first remaining VM, if any
+            const nextRow = document.querySelector<HTMLElement>(".vm-row");
+            if (nextRow) void selectVm(nextRow);
+        } catch (e) {
+            log(`Delete failed: ${e instanceof Error ? e.message : e}`, "error");
+        } finally {
+            deleteModalConfirm.disabled = false;
+        }
+    });
+
+    // Force stop confirmation modal
+    const stopModal        = document.getElementById("stop-modal")!;
+    const stopModalName    = document.getElementById("stop-modal-name")!;
+    const stopModalCancel  = document.getElementById("stop-modal-cancel")!;
+    const stopModalConfirm = document.getElementById("stop-modal-confirm")!;
+    stopModalCancel.addEventListener("click", () => stopModal.classList.add("hidden"));
+    stopModalConfirm.addEventListener("click", async () => {
+        stopModal.classList.add("hidden");
+        if (!activeVmid || !activeNode) return;
+        log(`Sending "Force Stop" to ${activeName}…`);
+        try {
+            const res = await fetch("/api/vms/power", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ vmid: Number(activeVmid), node: activeNode, action: "stop" }),
+            });
+            const data = await res.json();
+            if (!res.ok) throw new Error(data.error ?? res.statusText);
+            log(`Force Stop command accepted for ${activeName}.`, "ok");
+            await pollVMs();
+        } catch (e) {
+            log(`Force Stop failed: ${e instanceof Error ? e.message : e}`, "error");
+        }
+    });
+
     // Power controls
     document.querySelectorAll<HTMLElement>(".power-btn").forEach(btn => {
         btn.addEventListener("click", async () => {
-            if (!activeVmid) return;
+            if (!activeVmid || !activeNode) return;
             const action = btn.dataset.power!;
-            console.log(`Power action "${action}" on VM ${activeVmid}`);
-            // TODO: await fetch(`/api/vms/${activeVmid}/${action}`, { method: "POST" });
+            const label  = btn.textContent?.trim() ?? action;
+
+            // Force stop requires confirmation
+            if (action === "stop") {
+                stopModalName.textContent = activeName ?? "this VM";
+                stopModal.classList.remove("hidden");
+                return;
+            }
+
+            btn.setAttribute("disabled", "");
+            log(`Sending "${label}" to ${activeName}…`);
+
+            try {
+                const res = await fetch("/api/vms/power", {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({ vmid: Number(activeVmid), node: activeNode, action }),
+                });
+                const data = await res.json();
+                if (!res.ok) throw new Error(data.error ?? res.statusText);
+                log(`${label} command accepted for ${activeName}.`, "ok");
+                // Trigger an immediate poll so the status dot updates quickly
+                await pollVMs();
+            } catch (e) {
+                log(`${label} failed: ${e instanceof Error ? e.message : e}`, "error");
+            } finally {
+                btn.removeAttribute("disabled");
+            }
         });
     });
 
     // Config save
-    cfgSave.addEventListener("click", () => {
-        if (!activeVmid) return;
-        const payload = {
-            vcpus: cfgVcpus.value,
-            memory: cfgMem.value,
-            description: cfgDesc.value,
-        };
-        console.log(`Save config for VM ${activeVmid}`, payload);
-        // TODO: await fetch(`/api/vms/${activeVmid}/config`, { method: "PATCH", body: JSON.stringify(payload) });
+    cfgSave.addEventListener("click", async () => {
+        if (!activeVmid || !activeNode) return;
+
+        const cores  = Number(cfgVcpus.value) || undefined;
+        const memory = Number(cfgMem.value)   || undefined;
+        const description = cfgDesc.value;
+
+        cfgSave.setAttribute("disabled", "");
+        cfgSave.textContent = "Saving…";
+        log(`Saving config for ${activeName}…`);
+
+        try {
+            const res = await fetch("/api/vms/config", {
+                method: "PATCH",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ vmid: Number(activeVmid), node: activeNode, cores, memory, description }),
+            });
+            const data = await res.json();
+            if (!res.ok) throw new Error(data.error ?? res.statusText);
+            log(`Config saved for ${activeName}.`, "ok");
+            // Warn user if VM is currently running
+            const activeRow = document.querySelector<HTMLElement>(`.vm-row[data-vmid="${activeVmid}"]`);
+            if (activeRow?.dataset.status === "running") {
+                restartModal.classList.remove("hidden");
+            }
+        } catch (e) {
+            log(`Config save failed: ${e instanceof Error ? e.message : e}`, "error");
+        } finally {
+            cfgSave.removeAttribute("disabled");
+            cfgSave.textContent = "Apply changes";
+        }
     });
     pollVMs();
     setInterval(pollVMs, POLL_MS);
+
+    //  VM modal
+    const newVmModal   = document.getElementById("new-vm-modal")!;
+    const newVmClose   = document.getElementById("new-vm-close")!;
+    const newVmCancel  = document.getElementById("new-vm-cancel")!;
+    const newVmSubmit  = document.getElementById("new-vm-submit")!;
+    const newVmName    = document.getElementById("new-vm-name")    as HTMLInputElement;
+    const newVmNode    = document.getElementById("new-vm-node")    as HTMLSelectElement;
+    const newVmStorage = document.getElementById("new-vm-storage") as HTMLSelectElement;
+    const newVmCores   = document.getElementById("new-vm-cores")   as HTMLInputElement;
+    const newVmMemory  = document.getElementById("new-vm-memory")  as HTMLInputElement;
+    const newVmDisk    = document.getElementById("new-vm-disk")    as HTMLInputElement;
+    const newVmError   = document.getElementById("new-vm-error")!;
+
+    // Node to storage map populated on open
+    let nodeStorageMap: Record<string, string[]> = {};
+
+    function closeNewVmModal() {
+        newVmModal.classList.add("hidden");
+    }
+    newVmClose.addEventListener("click", closeNewVmModal);
+    newVmCancel.addEventListener("click", closeNewVmModal);
+    newVmModal.addEventListener("click", (e) => { if (e.target === newVmModal) closeNewVmModal(); });
+
+    newVmNode.addEventListener("change", () => {
+        const storages = nodeStorageMap[newVmNode.value] ?? [];
+        newVmStorage.innerHTML = storages.length
+            ? storages.map(s => `<option value="${s}">${s}</option>`).join("")
+            : `<option value="">No storage found</option>`;
+    });
+
+    document.getElementById("create-vm-btn")!.addEventListener("click", async () => {
+        newVmError.classList.add("hidden");
+        newVmName.value    = "";
+        newVmCores.value   = "1";
+        newVmMemory.value  = "512";
+        newVmDisk.value    = "8";
+        newVmNode.innerHTML = `<option value="">Loading…</option>`;
+        newVmStorage.innerHTML = `<option value="">Select node first</option>`;
+        newVmModal.classList.remove("hidden");
+        newVmName.focus();
+
+        try {
+            const res = await fetch("/api/nodes");
+            if (!res.ok) throw new Error("Failed to load nodes");
+            const { nodes }: { nodes: { node: string; storage: string[] }[] } = await res.json();
+
+            nodeStorageMap = {};
+            for (const n of nodes) nodeStorageMap[n.node] = n.storage;
+
+            newVmNode.innerHTML = nodes.map(n => `<option value="${n.node}">${n.node}</option>`).join("");
+            // Populate storage for the first node
+            newVmNode.dispatchEvent(new Event("change"));
+        } catch (e) {
+            newVmError.textContent = `Could not load nodes: ${e instanceof Error ? e.message : e}`;
+            newVmError.classList.remove("hidden");
+        }
+    });
+
+    newVmSubmit.addEventListener("click", async () => {
+        const name    = newVmName.value.trim();
+        const node    = newVmNode.value;
+        const storage = newVmStorage.value;
+        const cores   = Number(newVmCores.value);
+        const memory  = Number(newVmMemory.value);
+        const diskSize = Number(newVmDisk.value);
+
+        newVmError.classList.add("hidden");
+
+        if (!name)    { newVmError.textContent = "VM name is required.";       newVmError.classList.remove("hidden"); return; }
+        if (!node)    { newVmError.textContent = "Please select a node.";      newVmError.classList.remove("hidden"); return; }
+        if (!storage) { newVmError.textContent = "Please select a storage.";   newVmError.classList.remove("hidden"); return; }
+
+        newVmSubmit.setAttribute("disabled", "");
+        newVmSubmit.textContent = "Creating…";
+
+        try {
+            const res = await fetch("/api/vms/create", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ node, name, cores, memory, diskSize, storage }),
+            });
+            const data = await res.json();
+            if (!res.ok) throw new Error(data.error ?? res.statusText);
+            closeNewVmModal();
+            log(`VM "${name}" created successfully.`, "ok");
+            await pollVMs();
+        } catch (e) {
+            newVmError.textContent = e instanceof Error ? e.message : String(e);
+            newVmError.classList.remove("hidden");
+        } finally {
+            newVmSubmit.removeAttribute("disabled");
+            newVmSubmit.textContent = "Create VM";
+        }
+    });
 
 </script>

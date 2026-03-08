@@ -7,13 +7,17 @@ const AUTH_HEADER = `PVEAPIToken=${PVE_TOKEN_ID}=${PVE_TOKEN_SECRET}`;
 async function pveRequest<T>(path: string, options: RequestInit = {}): Promise<T> {
     const url = `${PVE_HOST}/api2/json${path}`;
 
+    const headers: Record<string, string> = {
+        "Authorization": AUTH_HEADER,
+        ...(options.headers as Record<string, string>),
+    };
+    if (options.body && !headers["Content-Type"]) {
+        headers["Content-Type"] = "application/json";
+    }
+
     const response = await fetch(url, {
         ...options,
-        headers: {
-            "Authorization": AUTH_HEADER,
-            "Content-Type": "application/json",
-            ...options.headers,
-        },
+        headers,
         // Required if your PVE uses a self-signed cert
        // @ts-ignore
         dispatcher: new (await import("undici")).Agent({
@@ -49,6 +53,21 @@ export async function stopVM(node: string, vmid: number) {
     return pveRequest(`/nodes/${node}/qemu/${vmid}/status/stop`, { method: "POST" });
 }
 
+export async function shutdownVM(node: string, vmid: number) {
+    return pveRequest(`/nodes/${node}/qemu/${vmid}/status/shutdown`, { method: "POST" });
+}
+
+export async function rebootVM(node: string, vmid: number) {
+    return pveRequest(`/nodes/${node}/qemu/${vmid}/status/reboot`, { method: "POST" });
+}
+
+export async function updateVMConfig(node: string, vmid: number, config: Partial<PVEVMConfig>) {
+    return pveRequest(`/nodes/${node}/qemu/${vmid}/config`, {
+        method: "PUT",
+        body: JSON.stringify(config),
+    });
+}
+
 export async function getVNCProxy(node: string, vmid: number) {
     return pveRequest<{ ticket: string; port: number; cert?: string }>(
         `/nodes/${node}/qemu/${vmid}/vncproxy`,
@@ -60,8 +79,37 @@ export async function getStorage(node: string) {
     return pveRequest<PVEStorage[]>(`/nodes/${node}/storage`);
 }
 
+export async function getNextVmid(): Promise<number> {
+    return pveRequest<number>("/cluster/nextid");
+}
+
+export async function createVM(node: string, params: Record<string, string | number>) {
+    const body = new URLSearchParams();
+    for (const [k, v] of Object.entries(params)) body.set(k, String(v));
+    return pveRequest<string>(`/nodes/${node}/qemu`, {
+        method: "POST",
+        body: body.toString(),
+        headers: { "Content-Type": "application/x-www-form-urlencoded" },
+    });
+}
+
+export async function addVMToPool(poolid: string, vmid: number) {
+    const body = new URLSearchParams({ vms: String(vmid) });
+    return pveRequest(`/pools/${poolid}`, {
+        method: "PUT",
+        body: body.toString(),
+        headers: { "Content-Type": "application/x-www-form-urlencoded" },
+    });
+}
+
 export async function getVMConfig(node: string, vmid: number) {
     return pveRequest<PVEVMConfig>(`/nodes/${node}/qemu/${vmid}/config`);
+}
+
+export async function deleteVM(node: string, vmid: number) {
+    return pveRequest<string>(`/nodes/${node}/qemu/${vmid}?purge=1&destroy-unreferenced-disks=1`, {
+        method: "DELETE",
+    });
 }
 
 export interface PVEVMConfig {
