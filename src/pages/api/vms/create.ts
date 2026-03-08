@@ -15,6 +15,7 @@ export const POST: APIRoute = async ({ request }) => {
         memory?: number;
         diskSize?: number;
         storage?: string;
+        iso?: string; // e.g. "local:iso/debian-12.iso"
     };
     try {
         body = await request.json();
@@ -22,7 +23,7 @@ export const POST: APIRoute = async ({ request }) => {
         return new Response(JSON.stringify({ error: "Invalid JSON" }), { status: 400 });
     }
 
-    const { node, name, cores = 1, memory = 512, diskSize = 8, storage = "local-lvm" } = body;
+    const { node, name, cores = 1, memory = 512, diskSize = 8, storage = "local-lvm", iso } = body;
 
     if (!node || !name) {
         return new Response(JSON.stringify({ error: "Missing node or name" }), { status: 400 });
@@ -62,6 +63,8 @@ export const POST: APIRoute = async ({ request }) => {
             [`scsi0`]: `${storage}:${diskSize}`,
             net0: "virtio,bridge=vmbr0",
             ostype: "l26",
+            agent: "1",
+            ...(iso ? { ide2: `${iso},media=cdrom`, boot: "order=ide2;scsi0" } : {}),
         });
 
         // Add to user's pool

@@ -203,6 +203,8 @@ const firstVm = vms[0] ?? null;
                             <div class="flex justify-between"><span class="text-neutral-500">Memory</span><span class="text-neutral-300" id="spec-mem">{(firstVm.mem / 1024 ** 3).toFixed(2)} / {(firstVm.maxmem / 1024 ** 3).toFixed(2)} GB</span></div>
                             <div class="flex justify-between"><span class="text-neutral-500">Disk</span><span class="text-neutral-300" id="spec-disk">{(firstVm.maxdisk / 1024 ** 3).toFixed(1)} GB</span></div>
                             <div class="flex justify-between"><span class="text-neutral-500">Uptime</span><span class="text-neutral-300" id="spec-uptime">{firstVm.uptime ? formatUptime(firstVm.uptime) : "-"}</span></div>
+                            <div class="flex justify-between"><span class="text-neutral-500">IPv4</span><span class="text-neutral-300 font-mono" id="spec-ipv4">—</span></div>
+                            <div class="flex justify-between"><span class="text-neutral-500">IPv6</span><span class="text-neutral-300 font-mono text-xs break-all" id="spec-ipv6">—</span></div>
                         </>
                     ) : <span class="text-neutral-600">Select a VM</span>}
                 </div>
@@ -372,6 +374,23 @@ const firstVm = vms[0] ?? null;
                         class="bg-neutral-900 border border-neutral-600 rounded-xs px-2 py-1.5 text-xs text-neutral-200 focus:outline-none focus:border-blue-400 w-full" />
                 </label>
             </div>
+
+            <div class="grid grid-cols-2 gap-3">
+                <label class="flex flex-col gap-1">
+                    <span class="text-xs text-neutral-500">ISO Storage</span>
+                    <select id="new-vm-iso-storage"
+                        class="bg-neutral-900 border border-neutral-600 rounded-xs px-2 py-1.5 text-xs text-neutral-200 focus:outline-none focus:border-blue-400 w-full cursor-pointer">
+                        <option value="">Select node first</option>
+                    </select>
+                </label>
+                <label class="flex flex-col gap-1">
+                    <span class="text-xs text-neutral-500">ISO Image</span>
+                    <select id="new-vm-iso"
+                        class="bg-neutral-900 border border-neutral-600 rounded-xs px-2 py-1.5 text-xs text-neutral-200 focus:outline-none focus:border-blue-400 w-full cursor-pointer">
+                        <option value="">No ISO (none)</option>
+                    </select>
+                </label>
+            </div>
         </div>
 
         <p id="new-vm-error" class="hidden text-xs text-rose-400"></p>
@@ -397,6 +416,8 @@ const firstVm = vms[0] ?? null;
     const specMem      = document.getElementById("spec-mem")!;
     const specDisk     = document.getElementById("spec-disk")!;
     const specUptime   = document.getElementById("spec-uptime")!;
+    const specIpv4     = document.getElementById("spec-ipv4")!;
+    const specIpv6     = document.getElementById("spec-ipv6")!;
     const cfgVcpus     = document.getElementById("cfg-vcpus") as HTMLInputElement;
     const cfgMem       = document.getElementById("cfg-mem")   as HTMLInputElement;
     const cfgDesc      = document.getElementById("cfg-desc")  as HTMLTextAreaElement;
@@ -437,6 +458,29 @@ const firstVm = vms[0] ?? null;
         specMem.textContent    = mem    ?? "—";
         specDisk.textContent   = disk   ?? "—";
         specUptime.textContent = uptime ?? "—";
+        specIpv4.textContent   = "…";
+        specIpv6.textContent   = "…";
+
+        // Fetch IPs from QEMU agent (non-blocking)
+        if (vmid && node && status === "running") {
+            fetch(`/api/vms/ip?vmid=${vmid}&node=${encodeURIComponent(node)}`)
+                .then(r => r.json())
+                .then(({ ipv4, ipv6 }: { ipv4: string[]; ipv6: string[] }) => {
+                    if (activeVmid !== vmid) return;
+                    specIpv4.textContent = ipv4.length ? ipv4[0] : "No agent";
+                    specIpv4.title = ipv4.join("\n");
+                    specIpv6.textContent = ipv6.length ? ipv6[0] : "—";
+                    specIpv6.title = ipv6.join("\n");
+                })
+                .catch(() => {
+                    if (activeVmid !== vmid) return;
+                    specIpv4.textContent = "No agent";
+                    specIpv6.textContent = "—";
+                });
+        } else {
+            specIpv4.textContent = "—";
+            specIpv6.textContent = "—";
+        }
 
         // Config inputs — reset while loading
         cfgVcpus.disabled = true;
@@ -753,14 +797,31 @@ const firstVm = vms[0] ?? null;
     const newVmSubmit  = document.getElementById("new-vm-submit")!;
     const newVmName    = document.getElementById("new-vm-name")    as HTMLInputElement;
     const newVmNode    = document.getElementById("new-vm-node")    as HTMLSelectElement;
-    const newVmStorage = document.getElementById("new-vm-storage") as HTMLSelectElement;
+    const newVmStorage    = document.getElementById("new-vm-storage")     as HTMLSelectElement;
+    const newVmIsoStorage = document.getElementById("new-vm-iso-storage") as HTMLSelectElement;
+    const newVmIso        = document.getElementById("new-vm-iso")         as HTMLSelectElement;
     const newVmCores   = document.getElementById("new-vm-cores")   as HTMLInputElement;
     const newVmMemory  = document.getElementById("new-vm-memory")  as HTMLInputElement;
     const newVmDisk    = document.getElementById("new-vm-disk")    as HTMLInputElement;
     const newVmError   = document.getElementById("new-vm-error")!;
 
     // Node to storage map populated on open
-    let nodeStorageMap: Record<string, string[]> = {};
+    let nodeStorageMap:    Record<string, string[]> = {};
+    let nodeIsoStorageMap: Record<string, string[]> = {};
+
+    async function loadIsos(node: string, storage: string) {
+        newVmIso.innerHTML = `<option value="">Loading ISOs…</option>`;
+        try {
+            const res = await fetch(`/api/vms/isos?node=${encodeURIComponent(node)}&storage=${encodeURIComponent(storage)}`);
+            const { isos }: { isos: { volid: string; name: string }[] } = await res.json();
+            newVmIso.innerHTML = `<option value="">No ISO (none)</option>` +
+                (isos.length
+                    ? isos.map(i => `<option value="${i.volid}">${i.name}</option>`).join("")
+                    : `<option value="" disabled>No ISOs found</option>`);
+        } catch {
+            newVmIso.innerHTML = `<option value="">No ISO (none)</option>`;
+        }
+    }
 
     function closeNewVmModal() {
         newVmModal.classList.add("hidden");
@@ -770,20 +831,40 @@ const firstVm = vms[0] ?? null;
     newVmModal.addEventListener("click", (e) => { if (e.target === newVmModal) closeNewVmModal(); });
 
     newVmNode.addEventListener("change", () => {
-        const storages = nodeStorageMap[newVmNode.value] ?? [];
+        const node        = newVmNode.value;
+        const storages    = nodeStorageMap[node]    ?? [];
+        const isoStorages = nodeIsoStorageMap[node] ?? [];
+
         newVmStorage.innerHTML = storages.length
             ? storages.map(s => `<option value="${s}">${s}</option>`).join("")
             : `<option value="">No storage found</option>`;
+
+        newVmIsoStorage.innerHTML = isoStorages.length
+            ? isoStorages.map(s => `<option value="${s}">${s}</option>`).join("")
+            : `<option value="">No ISO storage found</option>`;
+        newVmIso.innerHTML = `<option value="">No ISO (none)</option>`;
+
+        if (node && isoStorages.length) {
+            void loadIsos(node, isoStorages[0]);
+        }
+    });
+
+    newVmIsoStorage.addEventListener("change", () => {
+        const node    = newVmNode.value;
+        const storage = newVmIsoStorage.value;
+        if (node && storage) void loadIsos(node, storage);
     });
 
     document.getElementById("create-vm-btn")!.addEventListener("click", async () => {
         newVmError.classList.add("hidden");
         newVmName.value    = "";
-        newVmCores.value   = "1";
-        newVmMemory.value  = "512";
-        newVmDisk.value    = "8";
-        newVmNode.innerHTML = `<option value="">Loading…</option>`;
-        newVmStorage.innerHTML = `<option value="">Select node first</option>`;
+        newVmCores.value   = "2";
+        newVmMemory.value  = "2048";
+        newVmDisk.value    = "32";
+        newVmNode.innerHTML       = `<option value="">Loading…</option>`;
+        newVmStorage.innerHTML    = `<option value="">Select node first</option>`;
+        newVmIsoStorage.innerHTML = `<option value="">Select node first</option>`;
+        newVmIso.innerHTML        = `<option value="">No ISO (none)</option>`;
         newVmModal.classList.remove("hidden");
         newVmName.focus();
 
@@ -792,8 +873,12 @@ const firstVm = vms[0] ?? null;
             if (!res.ok) throw new Error("Failed to load nodes");
             const { nodes }: { nodes: { node: string; storage: string[] }[] } = await res.json();
 
-            nodeStorageMap = {};
-            for (const n of nodes) nodeStorageMap[n.node] = n.storage;
+            nodeStorageMap    = {};
+            nodeIsoStorageMap = {};
+            for (const n of nodes) {
+                nodeStorageMap[n.node]    = n.storage;
+                nodeIsoStorageMap[n.node] = (n as any).isoStorage ?? [];
+            }
 
             newVmNode.innerHTML = nodes.map(n => `<option value="${n.node}">${n.node}</option>`).join("");
             // Populate storage for the first node
@@ -805,11 +890,12 @@ const firstVm = vms[0] ?? null;
     });
 
     newVmSubmit.addEventListener("click", async () => {
-        const name    = newVmName.value.trim();
-        const node    = newVmNode.value;
-        const storage = newVmStorage.value;
-        const cores   = Number(newVmCores.value);
-        const memory  = Number(newVmMemory.value);
+        const name     = newVmName.value.trim();
+        const node     = newVmNode.value;
+        const storage  = newVmStorage.value;
+        const iso      = newVmIso.value || undefined;
+        const cores    = Number(newVmCores.value);
+        const memory   = Number(newVmMemory.value);
         const diskSize = Number(newVmDisk.value);
 
         newVmError.classList.add("hidden");
@@ -825,7 +911,7 @@ const firstVm = vms[0] ?? null;
             const res = await fetch("/api/vms/create", {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({ node, name, cores, memory, diskSize, storage }),
+                body: JSON.stringify({ node, name, cores, memory, diskSize, storage, iso }),
             });
             const data = await res.json();
             if (!res.ok) throw new Error(data.error ?? res.statusText);

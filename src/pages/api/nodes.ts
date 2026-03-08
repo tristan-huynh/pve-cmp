@@ -16,13 +16,15 @@ export const GET: APIRoute = async ({ request }) => {
                 .map(async (n) => {
                     try {
                         const storage = await getStorage(n.node);
-                        // Only include storage pools that can hold VM images
-                        const vmStorage = storage.filter(s =>
-                            s.content?.includes("images") && s.active
-                        );
-                        return { node: n.node, storage: vmStorage.map(s => s.storage) };
+                        const vmStorage  = storage.filter(s => s.content?.includes("images") && s.active);
+                        const isoStorage = storage.filter(s => s.content?.includes("iso") && s.active);
+                        return {
+                            node: n.node,
+                            storage:    vmStorage.map(s => s.storage),
+                            isoStorage: isoStorage.map(s => s.storage),
+                        };
                     } catch {
-                        return { node: n.node, storage: [] };
+                        return { node: n.node, storage: [], isoStorage: [] };
                     }
                 })
         );

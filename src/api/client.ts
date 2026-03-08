@@ -79,6 +79,18 @@ export async function getStorage(node: string) {
     return pveRequest<PVEStorage[]>(`/nodes/${node}/storage`);
 }
 
+export interface PVEStorageContent {
+    volid: string;
+    name?: string;
+    size: number;
+    content: string;
+}
+
+export async function getStorageContent(node: string, storage: string, content?: string) {
+    const qs = content ? `?content=${content}` : "";
+    return pveRequest<PVEStorageContent[]>(`/nodes/${node}/storage/${storage}/content${qs}`);
+}
+
 export async function getNextVmid(): Promise<number> {
     return pveRequest<number>("/cluster/nextid");
 }
@@ -110,6 +122,18 @@ export async function deleteVM(node: string, vmid: number) {
     return pveRequest<string>(`/nodes/${node}/qemu/${vmid}?purge=1&destroy-unreferenced-disks=1`, {
         method: "DELETE",
     });
+}
+
+export interface PVEAgentNetIface {
+    name: string;
+    "ip-addresses"?: Array<{ "ip-address": string; "ip-address-type": "ipv4" | "ipv6"; prefix: number }>;
+    "hardware-address"?: string;
+}
+
+export async function getAgentNetworkInterfaces(node: string, vmid: number) {
+    return pveRequest<{ result: PVEAgentNetIface[] }>(
+        `/nodes/${node}/qemu/${vmid}/agent/network-get-interfaces`
+    );
 }
 
 export interface PVEVMConfig {
