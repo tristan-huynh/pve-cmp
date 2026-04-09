@@ -1,13 +1,388 @@
 ---
 import Default from "../layout/default.astro";
 import { auth } from "../lib/auth";
+import { getPools, getPool, getVMStatus } from "../api/client";
+import type { PVEVMStatus } from "../api/client";
 
 const session = await auth.api.getSession({ headers: Astro.request.headers });
 if (!session) return Astro.redirect("/sign-in");
+
+const user = session.user;
+
+let vms: (PVEVMStatus & { node: string })[] = [];
+let error = "";
+
+try {
+    const pools = await getPools();
+    const userPool = pools.find(p =>
+        p.poolid === user.email ||
+        p.poolid === user.email?.split("@")[0] ||
+        p.poolid === user.name
+    );
+
+    if (userPool) {
+        const poolDetail = await getPool(userPool.poolid);
+        const vmMembers = poolDetail.members.filter(m => m.type === "qemu");
+        vms = (await Promise.all(
+            vmMembers.map(async (m) => {
+                try {
+                    const status = await getVMStatus(m.node, m.vmid);
+                    return { ...status, node: m.node };
+                } catch { return null; }
+            })
+        )).filter(Boolean) as (PVEVMStatus & { node: string })[];
+    } else {
+        error = `No pool found matching user "${user.name ?? user.email}".`;
+    }
+} catch (e) {
+    error = `Failed to fetch data: ${e instanceof Error ? e.message : e}`;
+}
+
+const totalCpu = vms.reduce((s, v) => s + v.cpu, 0);
+const totalMemGb = vms.reduce((s, v) => s + v.maxmem, 0) / 1024 ** 3;
+const totalDiskGb = vms.reduce((s, v) => s + v.maxdisk, 0) / 1024 ** 3;
+const runningVms = vms.filter(v => v.status === "running").length;
+
+function formatUptime(s: number): string {
+    const d = Math.floor(s / 86400);
+    const h = Math.floor((s % 86400) / 3600);
+    const m = Math.floor((s % 3600) / 60);
+    return `${d}d ${h}h ${m}m`;
+}
 ---
 
 <Default>
-    <main class="mt-16 p-6">
+    <div class="flex h-[calc(100vh-3.5rem)] overflow-hidden">
+        <!-- LEFT SIDEBAR -->
+        <div class="bg-neutral-900 border-neutral-600 flex flex-col w-xs border-r overflow-y-auto">
+            <div class="border-neutral-600 p-4 border-b">
+                <p class="text-neutral-300 text-md mb-3">Allocated Resources</p>
+                <div class="flex flex-col gap-2">
+                    <div class="text-neutral-300 text-xs">
+                        <div class="flex justify-between">
+                            <span>VMs</span><span>{vms.length} / 10</span>
+                        </div>
+                        <div class="w-full bg-neutral-700 rounded h-1.5">
+                            <div class="bg-blue-400 h-1.5 rounded" style={`width:${Math.min((vms.length/10)*100,100)}%`}></div>
+                        </div>
+                    </div>
+                    <div class="text-neutral-300 text-xs">
+                        <div class="flex justify-between">
+                            <span>CPU</span><span>{(totalCpu * 100).toFixed(1)}% avg</span>
+                        </div>
+                        <div class="w-full bg-neutral-700 rounded h-1.5">
+                            <div class="bg-blue-400 h-1.5 rounded" style={`width:${Math.min(totalCpu*100/Math.max(vms.length,1),100).toFixed(0)}%`}></div>
+                        </div>
+                    </div>
+                    <div class="text-neutral-300 text-xs">
+                        <div class="flex justify-between">
+                            <span>Memory</span><span>{totalMemGb.toFixed(1)} GB / 32 GB</span>
+                        </div>
+                        <div class="w-full bg-neutral-700 rounded h-1.5">
+                            <div class="bg-purple-400 h-1.5 rounded" style={`width:${Math.min((totalMemGb/32)*100,100).toFixed(0)}%`}></div>
+                        </div>
+                    </div>
+                    <div class="text-neutral-300 text-xs">
+                        <div class="flex justify-between">
+                            <span>Disk</span><span>{totalDiskGb.toFixed(0)} GB / 200 GB</span>
+                        </div>
+                        <div class="w-full bg-neutral-700 rounded h-1.5">
+                            <div class="bg-amber-400 h-1.5 rounded" style={`width:${Math.min((totalDiskGb/200)*100,100).toFixed(0)}%`}></div>
+                        </div>
+                    </div>
+                </div>
+            </div>
 
-    </main>
+            <div class="p-4 border-b border-neutral-600">
+                <p class="text-neutral-300 text-md mb-2">Quick Stats</p>
+                <div class="flex flex-col gap-1.5 text-xs text-neutral-400">
+                    <div class="flex justify-between">
+                        <span>Running VMs</span>
+                        <span class="text-green-400">{runningVms}</span>
+                    </div>
+                    <div class="flex justify-between">
+                        <span>Stopped VMs</span>
+                        <span class="text-neutral-500">{vms.length - runningVms}</span>
+                    </div>
+                    <div class="flex justify-between">
+                        <span>Total VMs</span>
+                        <span class="text-neutral-200">{vms.length}</span>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- MAIN CONTENT -->
+        <div class="flex-1 flex flex-col overflow-y-auto bg-neutral-950">
+            <div class="p-6">
+                <h1 class="text-2xl font-semibold text-neutral-100 mb-6">Dashboard</h1>
+
+                <!-- Resource Usage Charts -->
+                <div class="grid grid-cols-1 lg:grid-cols-3 gap-4 mb-6">
+                    <div class="bg-neutral-900 border border-neutral-700 rounded-xs p-4">
+                        <p class="text-sm text-neutral-300 mb-3">CPU Usage</p>
+                        <div id="cpu-chart" class="h-48"></div>
+                    </div>
+                    <div class="bg-neutral-900 border border-neutral-700 rounded-xs p-4">
+                        <p class="text-sm text-neutral-300 mb-3">Memory Usage</p>
+                        <div id="memory-chart" class="h-48"></div>
+                    </div>
+                    <div class="bg-neutral-900 border border-neutral-700 rounded-xs p-4">
+                        <p class="text-sm text-neutral-300 mb-3">Disk Usage</p>
+                        <div id="disk-chart" class="h-48"></div>
+                    </div>
+                </div>
+
+                <!-- Virtual Machines Table -->
+                <div class="bg-neutral-900 border border-neutral-700 rounded-xs mb-6">
+                    <div class="border-b border-neutral-700 px-4 py-3">
+                        <p class="text-sm font-medium text-neutral-200">Virtual Machines</p>
+                    </div>
+                    <div class="overflow-x-auto">
+                        <table class="w-full text-sm">
+                            <thead class="bg-neutral-800 border-b border-neutral-700">
+                                <tr>
+                                    <th class="text-left px-4 py-3 text-xs font-medium text-neutral-400">Status</th>
+                                    <th class="text-left px-4 py-3 text-xs font-medium text-neutral-400">Name</th>
+                                    <th class="text-left px-4 py-3 text-xs font-medium text-neutral-400">VMID</th>
+                                    <th class="text-left px-4 py-3 text-xs font-medium text-neutral-400">Node</th>
+                                    <th class="text-left px-4 py-3 text-xs font-medium text-neutral-400">CPU</th>
+                                    <th class="text-left px-4 py-3 text-xs font-medium text-neutral-400">Memory</th>
+                                    <th class="text-left px-4 py-3 text-xs font-medium text-neutral-400">Disk</th>
+                                    <th class="text-left px-4 py-3 text-xs font-medium text-neutral-400">Uptime</th>
+                                </tr>
+                            </thead>
+                            <tbody class="divide-y divide-neutral-800">
+                                {error && (
+                                    <tr>
+                                        <td colspan="8" class="px-4 py-3 text-xs text-rose-400">{error}</td>
+                                    </tr>
+                                )}
+                                {!error && vms.length === 0 && (
+                                    <tr>
+                                        <td colspan="8" class="px-4 py-3 text-xs text-neutral-500">No VMs found.</td>
+                                    </tr>
+                                )}
+                                {vms.map((vm) => (
+                                    <tr class="hover:bg-neutral-800/50 transition">
+                                        <td class="px-4 py-3">
+                                            <span class={`inline-flex items-center gap-1.5 text-xs ${vm.status === "running" ? "text-green-400" : "text-neutral-500"}`}>
+                                                <span class={`h-2 w-2 rounded-full ${vm.status === "running" ? "bg-green-400" : "bg-neutral-500"}`}></span>
+                                                {vm.status}
+                                            </span>
+                                        </td>
+                                        <td class="px-4 py-3 text-xs text-neutral-200">{vm.name ?? "VM"}</td>
+                                        <td class="px-4 py-3 text-xs text-neutral-400 font-mono">{vm.vmid}</td>
+                                        <td class="px-4 py-3 text-xs text-neutral-400">{vm.node}</td>
+                                        <td class="px-4 py-3 text-xs text-neutral-400">{(vm.cpu * 100).toFixed(1)}%</td>
+                                        <td class="px-4 py-3 text-xs text-neutral-400">
+                                            {(vm.mem / 1024 ** 3).toFixed(1)} / {(vm.maxmem / 1024 ** 3).toFixed(1)} GB
+                                        </td>
+                                        <td class="px-4 py-3 text-xs text-neutral-400">{(vm.maxdisk / 1024 ** 3).toFixed(1)} GB</td>
+                                        <td class="px-4 py-3 text-xs text-neutral-400">{vm.uptime ? formatUptime(vm.uptime) : "-"}</td>
+                                    </tr>
+                                ))}
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+
+                <!-- Logs Table -->
+                <div class="bg-neutral-900 border border-neutral-700 rounded-xs">
+                    <div class="border-b border-neutral-700 px-4 py-3">
+                        <p class="text-sm font-medium text-neutral-200">Recent Activity Logs</p>
+                    </div>
+                    <div class="overflow-x-auto">
+                        <table class="w-full text-sm">
+                            <thead class="bg-neutral-800 border-b border-neutral-700">
+                                <tr>
+                                    <th class="text-left px-4 py-3 text-xs font-medium text-neutral-400">Timestamp</th>
+                                    <th class="text-left px-4 py-3 text-xs font-medium text-neutral-400">VM</th>
+                                    <th class="text-left px-4 py-3 text-xs font-medium text-neutral-400">Node</th>
+                                    <th class="text-left px-4 py-3 text-xs font-medium text-neutral-400">Event</th>
+                                    <th class="text-left px-4 py-3 text-xs font-medium text-neutral-400">Details</th>
+                                </tr>
+                            </thead>
+                            <tbody id="logs-tbody" class="divide-y divide-neutral-800 font-mono">
+                                {vms.map((vm) => (
+                                    <tr class="hover:bg-neutral-800/50 transition">
+                                        <td class="px-4 py-3 text-xs text-neutral-400">{new Date(Date.now() - (vm.uptime ?? 0) * 1000).toLocaleString()}</td>
+                                        <td class="px-4 py-3 text-xs text-neutral-200">{vm.name ?? "VM"}</td>
+                                        <td class="px-4 py-3 text-xs text-neutral-400">{vm.node}</td>
+                                        <td class="px-4 py-3">
+                                            <span class={`text-xs ${vm.status === "running" ? "text-green-400" : "text-neutral-500"}`}>
+                                                {vm.status === "running" ? "Started" : "Stopped"}
+                                            </span>
+                                        </td>
+                                        <td class="px-4 py-3 text-xs text-neutral-500">
+                                            {vm.status === "running" ? `Uptime: ${vm.uptime ? formatUptime(vm.uptime) : "-"}` : "VM is not running"}
+                                        </td>
+                                    </tr>
+                                ))}
+                                {vms.length === 0 && (
+                                    <tr>
+                                        <td colspan="5" class="px-4 py-3 text-xs text-neutral-500">No logs available.</td>
+                                    </tr>
+                                )}
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
 </Default>
+
+<script>
+    import * as echarts from 'echarts';
+
+    const vmsData = {
+        cpuData: [] as number[],
+        memData: [] as { value: number, total: number }[],
+        diskData: [] as { value: number, total: number }[],
+    };
+
+    // Get VM data from the page
+    const vmRows = document.querySelectorAll('tbody tr');
+    vmRows.forEach(row => {
+        const cpuText = row.querySelector('td:nth-child(5)')?.textContent;
+        const memText = row.querySelector('td:nth-child(6)')?.textContent;
+        const diskText = row.querySelector('td:nth-child(7)')?.textContent;
+        
+        if (cpuText && cpuText.includes('%')) {
+            vmsData.cpuData.push(parseFloat(cpuText));
+        }
+        
+        if (memText && memText.includes('/')) {
+            const [used, total] = memText.split('/').map(s => parseFloat(s));
+            if (!isNaN(used) && !isNaN(total)) {
+                vmsData.memData.push({ value: used, total });
+            }
+        }
+        
+        if (diskText && diskText.includes('GB')) {
+            const disk = parseFloat(diskText);
+            if (!isNaN(disk)) {
+                vmsData.diskData.push({ value: disk, total: 200 });
+            }
+        }
+    });
+
+    // CPU Chart - Gauge
+    const cpuChart = echarts.init(document.getElementById('cpu-chart')!);
+    const avgCpu = vmsData.cpuData.length > 0 
+        ? vmsData.cpuData.reduce((a, b) => a + b, 0) / vmsData.cpuData.length 
+        : 0;
+    
+    cpuChart.setOption({
+        series: [{
+            type: 'gauge',
+            startAngle: 180,
+            endAngle: 0,
+            min: 0,
+            max: 100,
+            splitNumber: 5,
+            axisLine: {
+                lineStyle: {
+                    width: 6,
+                    color: [[0.3, '#67e8f9'], [0.7, '#a78bfa'], [1, '#fb7185']]
+                }
+            },
+            pointer: {
+                itemStyle: { color: '#a78bfa' }
+            },
+            axisTick: { distance: -15, length: 4, lineStyle: { color: '#fff', width: 1 } },
+            splitLine: { distance: -20, length: 10, lineStyle: { color: '#fff', width: 2 } },
+            axisLabel: { color: '#a3a3a3', distance: 15, fontSize: 10 },
+            detail: {
+                valueAnimation: true,
+                formatter: '{value}%',
+                color: '#e5e5e5',
+                fontSize: 16,
+                offsetCenter: [0, '70%']
+            },
+            data: [{ value: avgCpu.toFixed(1), name: 'Avg CPU' }]
+        }]
+    });
+
+    // Memory Chart - Gauge
+    const memoryChart = echarts.init(document.getElementById('memory-chart')!);
+    const totalMem = vmsData.memData.reduce((sum, m) => sum + m.value, 0);
+    const maxMem = 32;
+    const memPercent = (totalMem / maxMem) * 100;
+    
+    memoryChart.setOption({
+        series: [{
+            type: 'gauge',
+            startAngle: 180,
+            endAngle: 0,
+            min: 0,
+            max: 100,
+            splitNumber: 5,
+            axisLine: {
+                lineStyle: {
+                    width: 6,
+                    color: [[0.3, '#67e8f9'], [0.7, '#c084fc'], [1, '#fb7185']]
+                }
+            },
+            pointer: {
+                itemStyle: { color: '#c084fc' }
+            },
+            axisTick: { distance: -15, length: 4, lineStyle: { color: '#fff', width: 1 } },
+            splitLine: { distance: -20, length: 10, lineStyle: { color: '#fff', width: 2 } },
+            axisLabel: { color: '#a3a3a3', distance: 15, fontSize: 10 },
+            detail: {
+                valueAnimation: true,
+                formatter: (value: number) => `${totalMem.toFixed(1)} GB`,
+                color: '#e5e5e5',
+                fontSize: 14,
+                offsetCenter: [0, '70%']
+            },
+            data: [{ value: memPercent.toFixed(1), name: 'Memory' }]
+        }]
+    });
+
+    // Disk Chart - Gauge
+    const diskChart = echarts.init(document.getElementById('disk-chart')!);
+    const totalDisk = vmsData.diskData.reduce((sum, d) => sum + d.value, 0);
+    const maxDisk = 200;
+    const diskPercent = (totalDisk / maxDisk) * 100;
+    
+    diskChart.setOption({
+        series: [{
+            type: 'gauge',
+            startAngle: 180,
+            endAngle: 0,
+            min: 0,
+            max: 100,
+            splitNumber: 5,
+            axisLine: {
+                lineStyle: {
+                    width: 6,
+                    color: [[0.3, '#67e8f9'], [0.7, '#fbbf24'], [1, '#fb7185']]
+                }
+            },
+            pointer: {
+                itemStyle: { color: '#fbbf24' }
+            },
+            axisTick: { distance: -15, length: 4, lineStyle: { color: '#fff', width: 1 } },
+            splitLine: { distance: -20, length: 10, lineStyle: { color: '#fff', width: 2 } },
+            axisLabel: { color: '#a3a3a3', distance: 15, fontSize: 10 },
+            detail: {
+                valueAnimation: true,
+                formatter: (value: number) => `${totalDisk.toFixed(0)} GB`,
+                color: '#e5e5e5',
+                fontSize: 14,
+                offsetCenter: [0, '70%']
+            },
+            data: [{ value: diskPercent.toFixed(1), name: 'Disk' }]
+        }]
+    });
+
+    // Handle window resize
+    window.addEventListener('resize', () => {
+        cpuChart.resize();
+        memoryChart.resize();
+        diskChart.resize();
+    });
+</script>
